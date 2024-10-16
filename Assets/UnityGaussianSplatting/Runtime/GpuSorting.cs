@@ -10,70 +10,67 @@ namespace GaussianSplatting.Runtime
 
     public class GpuSorting
     {
-        //The size of a threadblock partition in the sort
-        const uint DEVICE_RADIX_SORT_PARTITION_SIZE = 3840;
+        protected const int k_radix = 256;
+        protected const int k_radixPasses = 4;
+        protected const int k_partitionSize = 3840;
 
-        //The size of our radix in bits
-        const uint DEVICE_RADIX_SORT_BITS = 8;
+        protected const int k_minSize = 1;
+        protected const int k_maxSize = 65535 * k_partitionSize;
 
-        //Number of digits in our radix, 1 << DEVICE_RADIX_SORT_BITS
-        const uint DEVICE_RADIX_SORT_RADIX = 256;
-
-        //Number of sorting passes required to sort a 32bit key, KEY_BITS / DEVICE_RADIX_SORT_BITS
-        const uint DEVICE_RADIX_SORT_PASSES = 4;
+        protected const int k_globalHistPartSize = 32768;
 
         public struct Args
         {
-            public uint             count;
-            public GraphicsBuffer   inputKeys;
-            public GraphicsBuffer   inputValues;
+            public uint count;
+            public GraphicsBuffer inputKeys;
+            public GraphicsBuffer inputValues;
             public SupportResources resources;
             internal int workGroupCount;
         }
 
         public struct SupportResources
         {
-            public GraphicsBuffer altBuffer;
-            public GraphicsBuffer altPayloadBuffer;
-            public GraphicsBuffer passHistBuffer;
-            public GraphicsBuffer globalHistBuffer;
+            public GraphicsBuffer tempKeyBuffer;
+            public GraphicsBuffer tempPayloadBuffer;
+            public GraphicsBuffer tempGlobalHistBuffer;
+            public GraphicsBuffer tempPassHistBuffer;
+            public GraphicsBuffer tempIndexBuffer;
 
             public static SupportResources Load(uint count)
             {
-                //This is threadBlocks * DEVICE_RADIX_SORT_RADIX
-                uint scratchBufferSize = DivRoundUp(count, DEVICE_RADIX_SORT_PARTITION_SIZE) * DEVICE_RADIX_SORT_RADIX; 
-                uint reducedScratchBufferSize = DEVICE_RADIX_SORT_RADIX * DEVICE_RADIX_SORT_PASSES;
-
                 var target = GraphicsBuffer.Target.Structured;
                 var resources = new SupportResources
                 {
-                    altBuffer = new GraphicsBuffer(target, (int)count, 4) { name = "DeviceRadixAlt" },
-                    altPayloadBuffer = new GraphicsBuffer(target, (int)count, 4) { name = "DeviceRadixAltPayload" },
-                    passHistBuffer = new GraphicsBuffer(target, (int)scratchBufferSize, 4) { name = "DeviceRadixPassHistogram" },
-                    globalHistBuffer = new GraphicsBuffer(target, (int)reducedScratchBufferSize, 4) { name = "DeviceRadixGlobalHistogram" },
+                    tempKeyBuffer = new GraphicsBuffer(target, (int)count, 4) { name = "OneSweepAltKey" },
+                    tempPayloadBuffer = new GraphicsBuffer(target, (int)count, 4) { name = "OneSweepAltPayload" },
+                    tempGlobalHistBuffer = new GraphicsBuffer(target, k_radix * k_radixPasses, 4) { name = "OneSweepGlobalHistogram" },
+                    tempPassHistBuffer = new GraphicsBuffer(target, (int)(k_radix * DivRoundUp(count, k_partitionSize) * k_radixPasses), 4) { name = "OneSweepPassHistogram" },
+                    tempIndexBuffer = new GraphicsBuffer(target, k_radixPasses, sizeof(uint)) { name = "OneSweepIndex" },
                 };
                 return resources;
             }
 
             public void Dispose()
             {
-                altBuffer?.Dispose();
-                altPayloadBuffer?.Dispose();
-                passHistBuffer?.Dispose();
-                globalHistBuffer?.Dispose();
+                tempKeyBuffer?.Dispose();
+                tempPayloadBuffer?.Dispose();
+                tempGlobalHistBuffer?.Dispose();
+                tempPassHistBuffer?.Dispose();
+                tempIndexBuffer?.Dispose();
 
-                altBuffer = null;
-                altPayloadBuffer = null;
-                passHistBuffer = null;
-                globalHistBuffer = null;
+                tempKeyBuffer = null;
+                tempPayloadBuffer = null;
+                tempGlobalHistBuffer = null;
+                tempPassHistBuffer = null;
+                tempIndexBuffer = null;
             }
         }
 
         readonly ComputeShader m_CS;
-        readonly int m_kernelInitDeviceRadixSort = -1;
-        readonly int m_kernelUpsweep = -1;
-        readonly int m_kernelScan = -1;
-        readonly int m_kernelDownsweep = -1;
+        protected int m_kernelInit = -1;
+        protected int m_kernelGlobalHist = -1;
+        protected int m_kernelScan = -1;
+        protected int m_digitBinningPass = -1;
 
         readonly bool m_Valid;
 
@@ -84,22 +81,23 @@ namespace GaussianSplatting.Runtime
             m_CS = cs;
             if (cs)
             {
-                m_kernelInitDeviceRadixSort = cs.FindKernel("InitDeviceRadixSort");
-                m_kernelUpsweep = cs.FindKernel("Upsweep");
-                m_kernelScan = cs.FindKernel("Scan");
-                m_kernelDownsweep = cs.FindKernel("Downsweep");
+                m_kernelInit = m_CS.FindKernel("InitSweep");
+                m_kernelGlobalHist = m_CS.FindKernel("GlobalHistogram");
+                m_kernelScan = m_CS.FindKernel("Scan");
+                m_digitBinningPass = m_CS.FindKernel("DigitBinningPass");
             }
 
-            m_Valid = m_kernelInitDeviceRadixSort >= 0 &&
-                      m_kernelUpsweep >= 0 &&
-                      m_kernelScan >= 0 &&
-                      m_kernelDownsweep >= 0;
+            m_Valid = m_kernelInit >= 0 &&
+                        m_kernelGlobalHist >= 0 &&
+                        m_kernelScan >= 0 &&
+                        m_digitBinningPass >= 0;
+
             if (m_Valid)
             {
-                if (!cs.IsSupported(m_kernelInitDeviceRadixSort) ||
-                    !cs.IsSupported(m_kernelUpsweep) ||
-                    !cs.IsSupported(m_kernelScan) ||
-                    !cs.IsSupported(m_kernelDownsweep))
+                if (!m_CS.IsSupported(m_kernelInit) ||
+                    !m_CS.IsSupported(m_kernelGlobalHist) ||
+                    !m_CS.IsSupported(m_kernelScan) ||
+                    !m_CS.IsSupported(m_digitBinningPass))
                 {
                     m_Valid = false;
                 }
@@ -117,62 +115,85 @@ namespace GaussianSplatting.Runtime
             public uint padding0;                       // Padding - unused
         }
 
+        private void SetStaticRootParameters(
+            int numKeys,
+            CommandBuffer cmd,
+            GraphicsBuffer sortBuffer,
+            GraphicsBuffer passHistBuffer,
+            GraphicsBuffer globalHistBuffer,
+            GraphicsBuffer indexBuffer)
+        {
+            cmd.SetComputeIntParam(m_CS, "e_numKeys", numKeys);
+
+            cmd.SetComputeBufferParam(m_CS, m_kernelInit, "b_passHist", passHistBuffer);
+            cmd.SetComputeBufferParam(m_CS, m_kernelInit, "b_globalHist", globalHistBuffer);
+            cmd.SetComputeBufferParam(m_CS, m_kernelInit, "b_index", indexBuffer);
+
+            cmd.SetComputeBufferParam(m_CS, m_kernelGlobalHist, "b_sort", sortBuffer);
+            cmd.SetComputeBufferParam(m_CS, m_kernelGlobalHist, "b_globalHist", globalHistBuffer);
+
+            cmd.SetComputeBufferParam(m_CS, m_kernelScan, "b_passHist", passHistBuffer);
+            cmd.SetComputeBufferParam(m_CS, m_kernelScan, "b_globalHist", globalHistBuffer);
+
+            cmd.SetComputeBufferParam(m_CS, m_digitBinningPass, "b_passHist", passHistBuffer);
+            cmd.SetComputeBufferParam(m_CS, m_digitBinningPass, "b_index", indexBuffer);
+        }
+
+
+        private void Dispatch(
+            int numThreadBlocks,
+            int globalHistThreadBlocks,
+            CommandBuffer cmd,
+            GraphicsBuffer toSort,
+            GraphicsBuffer toSortPayload,
+            GraphicsBuffer alt,
+            GraphicsBuffer altPayload)
+        {
+            cmd.SetComputeIntParam(m_CS, "e_threadBlocks", numThreadBlocks);
+            cmd.DispatchCompute(m_CS, m_kernelInit, 256, 1, 1);
+
+            cmd.SetComputeIntParam(m_CS, "e_threadBlocks", globalHistThreadBlocks);
+            cmd.DispatchCompute(m_CS, m_kernelGlobalHist, globalHistThreadBlocks, 1, 1);
+
+            cmd.SetComputeIntParam(m_CS, "e_threadBlocks", numThreadBlocks);
+            cmd.DispatchCompute(m_CS, m_kernelScan, k_radixPasses, 1, 1);
+            for (int radixShift = 0; radixShift < 32; radixShift += 8)
+            {
+                cmd.SetComputeIntParam(m_CS, "e_radixShift", radixShift);
+                cmd.SetComputeBufferParam(m_CS, m_digitBinningPass, "b_sort", toSort);
+                cmd.SetComputeBufferParam(m_CS, m_digitBinningPass, "b_sortPayload", toSortPayload);
+                cmd.SetComputeBufferParam(m_CS, m_digitBinningPass, "b_alt", alt);
+                cmd.SetComputeBufferParam(m_CS, m_digitBinningPass, "b_altPayload", altPayload);
+                cmd.DispatchCompute(m_CS, m_digitBinningPass, numThreadBlocks, 1, 1);
+
+                (toSort, alt) = (alt, toSort);
+                (toSortPayload, altPayload) = (altPayload, toSortPayload);
+            }
+        }
+
         public void Dispatch(CommandBuffer cmd, Args args)
         {
             Assert.IsTrue(Valid);
 
-            GraphicsBuffer srcKeyBuffer = args.inputKeys;
-            GraphicsBuffer srcPayloadBuffer = args.inputValues;
-            GraphicsBuffer dstKeyBuffer = args.resources.altBuffer;
-            GraphicsBuffer dstPayloadBuffer = args.resources.altPayloadBuffer;
+            int threadBlocks = (int)DivRoundUp(args.count, k_partitionSize);
+            int globalHistThreadBlocks = (int)DivRoundUp(args.count, k_globalHistPartSize);
 
-            SortConstants constants = default;
-            constants.numKeys = args.count;
-            constants.threadBlocks = DivRoundUp(args.count, DEVICE_RADIX_SORT_PARTITION_SIZE);
+            SetStaticRootParameters(
+                (int)args.count,
+                cmd,
+                args.inputKeys,
+                args.resources.tempPassHistBuffer,
+                args.resources.tempGlobalHistBuffer,
+                args.resources.tempIndexBuffer);
 
-            // Setup overall constants
-            cmd.SetComputeIntParam(m_CS, "e_numKeys", (int)constants.numKeys);
-            cmd.SetComputeIntParam(m_CS, "e_threadBlocks", (int)constants.threadBlocks);
-
-            //Set statically located buffers
-            //Upsweep
-            cmd.SetComputeBufferParam(m_CS, m_kernelUpsweep, "b_passHist", args.resources.passHistBuffer);
-            cmd.SetComputeBufferParam(m_CS, m_kernelUpsweep, "b_globalHist", args.resources.globalHistBuffer);
-
-            //Scan
-            cmd.SetComputeBufferParam(m_CS, m_kernelScan, "b_passHist", args.resources.passHistBuffer);
-
-            //Downsweep
-            cmd.SetComputeBufferParam(m_CS, m_kernelDownsweep, "b_passHist", args.resources.passHistBuffer);
-            cmd.SetComputeBufferParam(m_CS, m_kernelDownsweep, "b_globalHist", args.resources.globalHistBuffer);
-
-            //Clear the global histogram
-            cmd.SetComputeBufferParam(m_CS, m_kernelInitDeviceRadixSort, "b_globalHist", args.resources.globalHistBuffer);
-            cmd.DispatchCompute(m_CS, m_kernelInitDeviceRadixSort, 1, 1, 1);
-
-            // Execute the sort algorithm in 8-bit increments
-            for (constants.radixShift = 0; constants.radixShift < 32; constants.radixShift += DEVICE_RADIX_SORT_BITS)
-            {
-                cmd.SetComputeIntParam(m_CS, "e_radixShift", (int)constants.radixShift);
-
-                //Upsweep
-                cmd.SetComputeBufferParam(m_CS, m_kernelUpsweep, "b_sort", srcKeyBuffer);
-                cmd.DispatchCompute(m_CS, m_kernelUpsweep, (int)constants.threadBlocks, 1, 1);
-
-                // Scan
-                cmd.DispatchCompute(m_CS, m_kernelScan, (int)DEVICE_RADIX_SORT_RADIX, 1, 1);
-
-                // Downsweep
-                cmd.SetComputeBufferParam(m_CS, m_kernelDownsweep, "b_sort", srcKeyBuffer);
-                cmd.SetComputeBufferParam(m_CS, m_kernelDownsweep, "b_sortPayload", srcPayloadBuffer);
-                cmd.SetComputeBufferParam(m_CS, m_kernelDownsweep, "b_alt", dstKeyBuffer);
-                cmd.SetComputeBufferParam(m_CS, m_kernelDownsweep, "b_altPayload", dstPayloadBuffer);
-                cmd.DispatchCompute(m_CS, m_kernelDownsweep, (int)constants.threadBlocks, 1, 1);
-
-                // Swap
-                (srcKeyBuffer, dstKeyBuffer) = (dstKeyBuffer, srcKeyBuffer);
-                (srcPayloadBuffer, dstPayloadBuffer) = (dstPayloadBuffer, srcPayloadBuffer);
-            }
+            Dispatch(
+                threadBlocks,
+                globalHistThreadBlocks,
+                cmd,
+                args.inputKeys,
+                args.inputValues,
+                args.resources.tempKeyBuffer,
+                args.resources.tempPayloadBuffer);
         }
     }
 }

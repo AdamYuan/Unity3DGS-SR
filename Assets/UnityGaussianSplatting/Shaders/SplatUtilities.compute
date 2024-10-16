@@ -18,17 +18,24 @@
 #pragma kernel CSCopySplats
 
 // DeviceRadixSort
-#pragma kernel InitDeviceRadixSort
+/* #pragma kernel InitDeviceRadixSort
 #pragma kernel Upsweep
 #pragma kernel Scan
-#pragma kernel Downsweep
+#pragma kernel Downsweep */
+
+// OneSweepSort
+/* #pragma kernel InitSweep
+#pragma kernel GlobalHistogram
+#pragma kernel Scan
+#pragma kernel DigitBinningPass */
 
 // GPU sorting needs wave ops
 #pragma require wavebasic
 
 #pragma use_dxc
 
-#include "DeviceRadixSort.hlsl"
+// #include "DeviceRadixSort.hlsl"
+#include "GPUSorting/OneSweep.hlsl"
 #include "GaussianSplatting.hlsl"
 
 float4x4 _MatrixObjectToWorld;
