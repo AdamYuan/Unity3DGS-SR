@@ -30,8 +30,6 @@
 #define FLAG_INCLUSIVE      2       //Flag value indicating inclusive sum of a partition tile is ready
 #define FLAG_MASK           3       //Mask used to retrieve flag values
 
-#define MAX_SPIN_COUNT      1       //How much should we allow threadblocks to wait on preceeding tiles?
-
 RWStructuredBuffer<uint> b_globalHist;                  //buffer holding device level offsets for each binning pass
 globallycoherent RWStructuredBuffer<uint> b_passHist;   //buffer used to store reduced sums of partition tiles
 globallycoherent RWStructuredBuffer<uint> b_index;      //buffer used to atomically assign partition tile indexes
@@ -244,28 +242,6 @@ inline void DeviceBroadcastReductionsWLT16(uint gtid, uint partIndex, uint histR
     }
 }
 
-//For ForwardSweep
-inline void CASDeviceBroadcastReductionsWGE16(uint gtid, uint partIndex, uint histReduction)
-{
-    if (partIndex < e_threadBlocks - 1)
-    {
-        InterlockedCompareStore(b_passHist[gtid + PassHistOffset(partIndex + 1)], 0,
-            FLAG_REDUCTION | histReduction << 2);
-    }
-}
-
-inline void CASDeviceBroadcastReductionsWLT16(uint gtid, uint partIndex, uint histReduction)
-{
-    if (partIndex < e_threadBlocks - 1)
-    {
-        InterlockedCompareStore(b_passHist[gtid + PassHistOffset(partIndex + 1)], 0,
-            FLAG_REDUCTION | (histReduction & 0xffff) << 2);
-        
-        InterlockedCompareStore(b_passHist[gtid + PassHistOffset(partIndex + 1)], 0,
-            FLAG_REDUCTION | (histReduction >> 16 & 0xffff) << 2);
-    }
-}
-
 inline void Lookback(uint gtid, uint partIndex, uint exclusiveHistReduction)
 {
     if (gtid < RADIX)
@@ -293,134 +269,4 @@ inline void Lookback(uint gtid, uint partIndex, uint exclusiveHistReduction)
             }
         }
     }
-}
-
-inline void InitializeLookbackFallback(uint gtid)
-{
-    if (gtid == 0)
-        g_d[0] = 0;
-    
-    if (gtid == 1)
-        g_d[1] = 0;
-}
-
-inline void FallbackHistogram(uint index)
-{
-#if defined(KEY_UINT)
-    InterlockedAdd(g_d[ExtractDigit(b_sort[index], e_radixShift) + RADIX], 1);
-#elif defined(KEY_INT)
-    InterlockedAdd(g_d[ExtractDigit(IntToUint(b_sort[index]), e_radixShift) + RADIX], 1);
-#elif defined(KEY_FLOAT)
-    InterlockedAdd(g_d[ExtractDigit(FloatToUint(b_sort[index]), e_radixShift) + RADIX], 1);
-#endif
-}
-
-inline void LookbackWithFallback(uint gtid, uint partIndex, uint exclusiveHistReduction)
-{
-    uint spinCount = 0;
-    uint lookbackReduction = 0;
-    bool lookbackComplete = gtid < RADIX ? false : true;
-    bool warpLookbackComplete = gtid < RADIX ? false : true;
-    uint lookbackIndex = (gtid & RADIX_MASK) + PassHistOffset(partIndex);
-    
-    while (g_d[0] < RADIX / WaveGetLaneCount())
-    {
-        //Try to read the preceeding tiles
-        uint flagPayload;
-        if (!warpLookbackComplete)
-        {
-            if (!lookbackComplete)
-            {
-                while (spinCount < MAX_SPIN_COUNT)
-                {
-                    flagPayload = b_passHist[lookbackIndex];
-                    if ((flagPayload & FLAG_MASK) > FLAG_NOT_READY)
-                        break;
-                    else
-                        spinCount++;
-                }
-            }
-            
-            //Did we encounter any deadlocks?
-            if (WaveActiveAnyTrue(spinCount == MAX_SPIN_COUNT) && !WaveGetLaneIndex())
-                InterlockedOr(g_d[1], 1);
-        }
-        GroupMemoryBarrierWithGroupSync();
-        
-        //Yes: fallback
-        if (g_d[1])
-        {
-            if (gtid < RADIX)
-                g_d[gtid + RADIX] = 0;
-            GroupMemoryBarrierWithGroupSync();
-            if (!gtid)
-                g_d[1] = 0;
-            
-            const uint fallbackEnd = PART_SIZE * ((lookbackIndex >> RADIX_LOG) - e_threadBlocks * CurrentPass());
-            for (uint i = gtid + PART_SIZE * ((lookbackIndex >> RADIX_LOG) - e_threadBlocks * CurrentPass() - 1); i < fallbackEnd; i += D_DIM)
-                FallbackHistogram(i);
-            GroupMemoryBarrierWithGroupSync();
-            
-            uint reduceOut;
-            if (gtid < RADIX)
-            {
-                InterlockedCompareExchange(b_passHist[gtid + PassHistOffset((lookbackIndex >> RADIX_LOG) - e_threadBlocks * CurrentPass())], 0,
-                    FLAG_REDUCTION | g_d[gtid + RADIX] << 2, reduceOut);
-            }
-            
-            if (!lookbackComplete)
-            {
-                if ((reduceOut & FLAG_MASK) == FLAG_INCLUSIVE)
-                {
-                    lookbackReduction += reduceOut >> 2;
-                    if (partIndex < e_threadBlocks - 1)
-                    {
-                        InterlockedAdd(b_passHist[gtid + PassHistOffset(partIndex + 1)],
-                            1 | lookbackReduction << 2);
-                    }
-                    lookbackComplete = true;
-                }
-                else
-                {
-                    lookbackReduction += g_d[gtid + RADIX];
-                }
-            }
-            
-            spinCount = 0;
-        }
-        else //No: proceed as normal
-        {
-            if (!lookbackComplete)
-            {
-                lookbackReduction += flagPayload >> 2;
-                if ((flagPayload & FLAG_MASK) == FLAG_INCLUSIVE)
-                {
-                    if (partIndex < e_threadBlocks - 1)
-                    {
-                        InterlockedAdd(b_passHist[gtid + PassHistOffset(partIndex + 1)],
-                            1 | lookbackReduction << 2);
-                    }
-                    lookbackComplete = true;
-                }
-                else
-                {
-                    spinCount = 0;
-                }
-            }
-        }
-        lookbackIndex -= RADIX; //The threadblock lookbacks in lockstep.
-        
-        //Have all digits completed their lookbacks?
-        if (!warpLookbackComplete)
-        {
-            warpLookbackComplete = WaveActiveAllTrue(lookbackComplete);
-            if (warpLookbackComplete && !WaveGetLaneIndex())
-                InterlockedAdd(g_d[0], 1);
-        }
-        GroupMemoryBarrierWithGroupSync();
-    }
-
-    //Post results into shared memory
-    if (gtid < RADIX)
-        g_d[gtid + PART_SIZE] = lookbackReduction - exclusiveHistReduction;
 }
