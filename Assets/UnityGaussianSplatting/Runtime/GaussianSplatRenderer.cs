@@ -212,6 +212,12 @@ namespace GaussianSplatting.Runtime
             DebugBoxes,
             DebugChunkBounds,
         }
+        
+        public enum SplatRenderMode
+        {
+            Quad,
+            Tile
+        }
         public GaussianSplatAsset m_Asset;
 
         [Range(0.1f, 2.0f)] [Tooltip("Additional scaling factor for the splats")]
@@ -223,11 +229,13 @@ namespace GaussianSplatting.Runtime
         public int m_SHOrder = 3;
         [Tooltip("Show only Spherical Harmonics contribution, using gray color")]
         public bool m_SHOnly;
-        [Range(1,30)] [Tooltip("Sort splats only every N frames")]
+        [Range(1,30)] [Tooltip("Sort splats only every N frames, ignored in Tile SplatRenderMode")]
         public int m_SortNthFrame = 1;
 
         public RenderMode m_RenderMode = RenderMode.Splats;
         [Range(1.0f,15.0f)] public float m_PointDisplaySize = 3.0f;
+        
+        public SplatRenderMode m_SplatRenderMode = SplatRenderMode.Quad;
 
         public GaussianCutout[] m_Cutouts;
 
