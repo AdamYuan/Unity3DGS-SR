@@ -28,7 +28,6 @@ namespace GaussianSplatting.Editor
         SerializedProperty m_PropSortNthFrame;
         SerializedProperty m_PropRenderMode;
         SerializedProperty m_PropPointDisplaySize;
-        SerializedProperty m_PropSplatRenderMode;
         SerializedProperty m_PropCutouts;
         SerializedProperty m_PropShaderSplats;
         SerializedProperty m_PropShaderComposite;
@@ -68,7 +67,6 @@ namespace GaussianSplatting.Editor
             m_PropSortNthFrame = serializedObject.FindProperty("m_SortNthFrame");
             m_PropRenderMode = serializedObject.FindProperty("m_RenderMode");
             m_PropPointDisplaySize = serializedObject.FindProperty("m_PointDisplaySize");
-            m_PropSplatRenderMode = serializedObject.FindProperty("m_SplatRenderMode");
             m_PropCutouts = serializedObject.FindProperty("m_Cutouts");
             m_PropShaderSplats = serializedObject.FindProperty("m_ShaderSplats");
             m_PropShaderComposite = serializedObject.FindProperty("m_ShaderComposite");
@@ -116,10 +114,6 @@ namespace GaussianSplatting.Editor
             EditorGUILayout.PropertyField(m_PropRenderMode);
             if (m_PropRenderMode.intValue is (int)GaussianSplatRenderer.RenderMode.DebugPoints or (int)GaussianSplatRenderer.RenderMode.DebugPointIndices)
                 EditorGUILayout.PropertyField(m_PropPointDisplaySize);
-            else if (m_PropRenderMode.intValue is (int)GaussianSplatRenderer.RenderMode.Splats) 
-            {
-                EditorGUILayout.PropertyField(m_PropSplatRenderMode);
-            }
 
             EditorGUILayout.Space();
             m_ResourcesExpanded = EditorGUILayout.Foldout(m_ResourcesExpanded, "Resources", true, EditorStyles.foldoutHeader);
