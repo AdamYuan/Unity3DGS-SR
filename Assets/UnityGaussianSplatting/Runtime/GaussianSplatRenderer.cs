@@ -515,7 +515,7 @@ namespace GaussianSplatting.Runtime
             if (m_Sorter.Valid)
                 m_SorterArgs.resources = GpuSorting.SupportResources.Load((uint)count);
 
-            m_GpuTileSortTileDist = new GraphicsBuffer(GraphicsBuffer.Target.Structured, count * kMaxTilesPerSplat, 4) { name = "GaussianSplatTileSortTiles" };
+            m_GpuTileSortTileDist = new GraphicsBuffer(GraphicsBuffer.Target.Structured, count * kMaxTilesPerSplat, 4) { name = "GaussianSplatTileSortTileDist" };
             m_GpuTileSortKeys = new GraphicsBuffer(GraphicsBuffer.Target.Structured, count * kMaxTilesPerSplat, 4) { name = "GaussianSplatTileSortIndices" };
 
             m_TileSorterArgs.inputKeys = m_GpuTileSortTileDist;
