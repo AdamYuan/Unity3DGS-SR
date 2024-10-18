@@ -6,6 +6,7 @@
  * https://github.com/b0nes164/GPUSorting
  *
  ******************************************************************************/
+#pragma multi_compile __ SORT_INDIRECT
 /* #pragma multi_compile __ KEY_UINT KEY_INT KEY_FLOAT
 #pragma multi_compile __ PAYLOAD_UINT PAYLOAD_INT PAYLOAD_FLOAT
 #pragma multi_compile __ SHOULD_ASCEND
@@ -35,13 +36,27 @@
 #define RADIX_LOG           8U      //log2(RADIX)
 #define RADIX_PASSES        4U      //(Key width) / RADIX_LOG
 
-cbuffer cbGpuSorting : register(b0)
-{
-    uint e_numKeys;
-    uint e_radixShift;
-    uint e_threadBlocks;
-    uint padding;
-};
+#if defined(SORT_INDIRECT)
+    cbuffer cbGpuSorting : register(b0)
+    {
+        uint e_radixShift;
+    };
+    cbuffer cbGpuSortingNumKeys : register(b1)
+    {
+        uint e_numKeys;
+    };
+    cbuffer cbGpuSortingNumThreadBlocks : register(b2)
+    {
+        uint e_threadBlocks;
+    };
+#else
+    cbuffer cbGpuSorting : register(b0)
+    {
+        uint e_radixShift;
+        uint e_numKeys;
+        uint e_threadBlocks;
+    };
+#endif
 
 #if defined(KEY_UINT)
 RWStructuredBuffer<uint> b_sort;
