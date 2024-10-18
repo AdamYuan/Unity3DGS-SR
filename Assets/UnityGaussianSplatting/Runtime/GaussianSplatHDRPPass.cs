@@ -14,6 +14,8 @@ namespace GaussianSplatting.Runtime
     {
         RTHandle m_RenderTarget;
 
+        public GaussianSplatRenderMode m_RenderMode;
+
         // It can be used to configure render targets and their clear state. Also to create temporary render target textures.
         // When empty this render pass will render to the active camera render target.
         // You should never call CommandBuffer.SetRenderTarget. Instead call <c>ConfigureTarget</c> and <c>ConfigureClear</c>.
@@ -23,7 +25,8 @@ namespace GaussianSplatting.Runtime
             m_RenderTarget = RTHandles.Alloc(Vector2.one,
                 colorFormat: GraphicsFormat.R16G16B16A16_SFloat, useDynamicScale: true,
                 depthBufferBits: DepthBits.None, msaaSamples: MSAASamples.None,
-                filterMode: FilterMode.Point, wrapMode: TextureWrapMode.Clamp, name: "_GaussianSplatRT");
+                filterMode: FilterMode.Point, wrapMode: TextureWrapMode.Clamp,
+                enableRandomWrite: true, name: "_GaussianSplatRT");
         }
 
         protected override void Execute(CustomPassContext ctx)
@@ -33,14 +36,23 @@ namespace GaussianSplatting.Runtime
             var system = GaussianSplatRenderSystem.instance;
             if (!system.GatherSplatsForCamera(cam))
                 return;
-            
-            ctx.cmd.SetGlobalTexture(m_RenderTarget.name, m_RenderTarget.nameID);
-            CoreUtils.SetRenderTarget(ctx.cmd, m_RenderTarget, ctx.cameraDepthBuffer, ClearFlag.Color,
-                new Color(0, 0, 0, 0));
 
-            // add sorting, view calc and drawing commands for each splat object
-            Material matComposite =
-                GaussianSplatRenderSystem.instance.SortAndRenderSplats(ctx.hdCamera.camera, ctx.cmd);
+            ctx.cmd.SetGlobalTexture(m_RenderTarget.name, m_RenderTarget.nameID);
+
+            Material matComposite;
+
+            if (m_RenderMode == GaussianSplatRenderMode.Quad)
+            {
+                CoreUtils.SetRenderTarget(ctx.cmd, m_RenderTarget, ctx.cameraDepthBuffer, ClearFlag.Color,
+                    new Color(0, 0, 0, 0));
+
+                // add sorting, view calc and drawing commands for each splat object
+                matComposite = GaussianSplatRenderSystem.instance.SortAndRenderSplats(ctx.hdCamera.camera, ctx.cmd);
+            }
+            else
+            {
+                matComposite = GaussianSplatRenderSystem.instance.TileSortAndRenderSplats(ctx.hdCamera.camera, ctx.cmd, m_RenderTarget);
+            }
 
             // compose
             ctx.cmd.BeginSample(GaussianSplatRenderSystem.s_ProfCompose);

@@ -144,17 +144,17 @@ namespace GaussianSplatting.Runtime
                 mpb.SetInteger(GaussianSplatRenderer.Props.DisplayChunks, gs.m_RenderMode == GaussianSplatRenderer.RenderMode.DebugChunkBounds ? 1 : 0);
 
                 cmb.BeginSample(s_ProfCalcView);
-                gs.CalcTileViewData(cmb, cam);
+                // gs.CalcTileViewData(cmb, cam);
                 gs.CalcViewData(cmb, cam, matrix);
                 cmb.EndSample(s_ProfCalcView);
 
                 // sort
                 if (gs.m_FrameCounter % gs.m_SortNthFrame == 0)
                     gs.SortPoints(cmb, cam, matrix);
-                gs.SortTilePoints(cmb, cam);
+                // gs.SortTilePoints(cmb, cam);
                 ++gs.m_FrameCounter;
                 
-                gs.CalcTileRanges(cmb, cam);
+                // gs.CalcTileRanges(cmb, cam);
 
                 // draw
                 int indexCount = 6;
@@ -173,7 +173,7 @@ namespace GaussianSplatting.Runtime
         }
 
         // ReSharper disable once MemberCanBePrivate.Global - used by HDRP/URP features that are not always compiled
-        public Material TileSortAndRenderSplats(Camera cam, CommandBuffer cmb)
+        public Material TileSortAndRenderSplats(Camera cam, CommandBuffer cmb, RTHandle target)
         {
             Material matComposite = null;
             foreach (var kvp in m_ActiveSplats)
@@ -189,6 +189,11 @@ namespace GaussianSplatting.Runtime
                 cmb.BeginSample(s_ProfCalcView);
                 gs.CalcTileViewData(cmb, cam);
                 cmb.EndSample(s_ProfCalcView);
+
+                gs.SortTilePoints(cmb, cam);
+                gs.CalcTileRanges(cmb, cam);
+                
+                gs.RenderTiles(cmb, cam, target);
             }
             return matComposite;
         }
@@ -347,6 +352,7 @@ namespace GaussianSplatting.Runtime
             public static readonly int SplatChunks = Shader.PropertyToID("_SplatChunks");
             public static readonly int SplatChunkCount = Shader.PropertyToID("_SplatChunkCount");
             public static readonly int SplatViewData = Shader.PropertyToID("_SplatViewData");
+            public static readonly int SplatViewDataRO = Shader.PropertyToID("_SplatViewDataRO");
             public static readonly int OrderBuffer = Shader.PropertyToID("_OrderBuffer");
             public static readonly int SplatScale = Shader.PropertyToID("_SplatScale");
             public static readonly int SplatOpacityScale = Shader.PropertyToID("_SplatOpacityScale");
@@ -360,12 +366,16 @@ namespace GaussianSplatting.Runtime
             public static readonly int SplatSortKeys = Shader.PropertyToID("_SplatSortKeys");
             public static readonly int SplatSortDistances = Shader.PropertyToID("_SplatSortDistances");
             public static readonly int TileSplatSortKeys = Shader.PropertyToID("_TileSplatSortKeys");
+            public static readonly int TileSplatSortKeysRO = Shader.PropertyToID("_TileSplatSortKeysRO");
             public static readonly int TileSplatSortDistances = Shader.PropertyToID("_TileSplatSortDistances");
             public static readonly int TileSplatSortTiles = Shader.PropertyToID("_TileSplatSortTiles");
+            public static readonly int TileSplatSortTilesRO = Shader.PropertyToID("_TileSplatSortTilesRO");
             public static readonly int TileSplatCount = Shader.PropertyToID("_TileSplatCount");
             public static readonly int TileSplatIndirect = Shader.PropertyToID("_TileSplatIndirect");
             public static readonly int TileRanges = Shader.PropertyToID("_TileRanges");
+            public static readonly int TileRangesRO = Shader.PropertyToID("_TileRangesRO");
             public static readonly int CBTileSplatCount = Shader.PropertyToID("cbTileSplatCount");
+            public static readonly int RenderTarget = Shader.PropertyToID("_RenderTarget");
             public static readonly int SrcBuffer = Shader.PropertyToID("_SrcBuffer");
             public static readonly int DstBuffer = Shader.PropertyToID("_DstBuffer");
             public static readonly int BufferSize = Shader.PropertyToID("_BufferSize");
@@ -401,7 +411,9 @@ namespace GaussianSplatting.Runtime
             CalcViewData,
             CalcTileViewData,
             InitTileSplatIndirect,
+            ReorderTileID,
             CalcTileRanges,
+            RenderTile,
             UpdateEditData,
             InitEditData,
             ClearBuffer,
@@ -694,6 +706,8 @@ namespace GaussianSplatting.Runtime
             Matrix4x4 matO2W = tr.localToWorldMatrix;
             Matrix4x4 matW2O = tr.worldToLocalMatrix;
             int screenW = cam.pixelWidth, screenH = cam.pixelHeight;
+            int tileCountW = (screenW + kSplatTileSize - 1) / kSplatTileSize;
+            int tileCountH = (screenH + kSplatTileSize - 1) / kSplatTileSize;
             Vector4 screenPar = new(screenW, screenH, 0, 0);
             Vector4 camPos = cam.transform.position;
 
@@ -707,9 +721,7 @@ namespace GaussianSplatting.Runtime
             cmb.SetComputeMatrixParam(m_CSSplatUtilities, Props.MatrixWorldToObject, matW2O);
 
             cmb.SetComputeVectorParam(m_CSSplatUtilities, Props.VecScreenParams, screenPar);
-            cmb.SetComputeIntParams(m_CSSplatUtilities, Props.VecTileParams, new int[2]{
-                (screenW + kSplatTileSize - 1) / kSplatTileSize, (screenH + kSplatTileSize - 1) / kSplatTileSize
-            });
+            cmb.SetComputeIntParams(m_CSSplatUtilities, Props.VecTileParams, new int[2]{ tileCountW, tileCountH });
             cmb.SetComputeVectorParam(m_CSSplatUtilities, Props.VecWorldSpaceCameraPos, camPos);
             cmb.SetComputeFloatParam(m_CSSplatUtilities, Props.SplatScale, m_SplatScale);
             cmb.SetComputeFloatParam(m_CSSplatUtilities, Props.SplatOpacityScale, m_OpacityScale);
@@ -717,7 +729,7 @@ namespace GaussianSplatting.Runtime
             cmb.SetComputeIntParam(m_CSSplatUtilities, Props.SHOnly, m_SHOnly ? 1 : 0);
 
             cmb.SetComputeBufferParam(m_CSSplatUtilities, (int)KernelIndices.CalcTileViewData, Props.TileSplatSortDistances, m_GpuTileSortDistances);
-            cmb.SetComputeBufferParam(m_CSSplatUtilities, (int)KernelIndices.CalcTileViewData, Props.TileSplatSortTiles, m_GpuTileSortTiles);
+            // cmb.SetComputeBufferParam(m_CSSplatUtilities, (int)KernelIndices.CalcTileViewData, Props.TileSplatSortTiles, m_GpuTileSortTiles);
             cmb.SetComputeBufferParam(m_CSSplatUtilities, (int)KernelIndices.CalcTileViewData, Props.TileSplatSortKeys, m_GpuTileSortKeys);
             cmb.SetComputeBufferParam(m_CSSplatUtilities, (int)KernelIndices.CalcTileViewData, Props.TileSplatCount, m_GpuTileSplatCount);
             
@@ -729,6 +741,12 @@ namespace GaussianSplatting.Runtime
 
             m_CSSplatUtilities.GetKernelThreadGroupSizes((int)KernelIndices.CalcTileViewData, out uint gsX, out _, out _);
             cmb.DispatchCompute(m_CSSplatUtilities, (int)KernelIndices.CalcTileViewData, (m_GpuView.count + (int)gsX - 1) / (int)gsX, 1, 1);
+
+            // Generate Indirect Buffer for the Count           
+            cmb.SetComputeConstantBufferParam(m_CSSplatUtilities, Props.CBTileSplatCount, m_GpuTileSplatCount, 0, sizeof(uint));
+            cmb.SetComputeBufferParam(m_CSSplatUtilities, (int)KernelIndices.InitTileSplatIndirect, Props.TileSplatCount, m_GpuTileSplatCount);
+            cmb.SetComputeBufferParam(m_CSSplatUtilities, (int)KernelIndices.InitTileSplatIndirect, Props.TileSplatIndirect, m_GpuTileSplatIndirect);
+            cmb.DispatchCompute(m_CSSplatUtilities, (int)KernelIndices.InitTileSplatIndirect, 1, 1, 1);
         }
 
         internal void SortTilePoints(CommandBuffer cmd, Camera cam)
@@ -739,8 +757,15 @@ namespace GaussianSplatting.Runtime
             // sort the splats
             cmd.BeginSample(s_ProfSort);
             m_Sorter.BeforeDispatchIndirect(cmd, m_TileSorterArgs);
+            // sort against distance
             m_TileSorterArgs.inputKeys = m_GpuTileSortDistances;
             m_Sorter.DispatchIndirect(cmd, m_TileSorterArgs);
+            // reorder tile ID
+            cmd.SetComputeBufferParam(m_CSSplatUtilities, (int)KernelIndices.ReorderTileID, Props.TileSplatSortTiles, m_GpuTileSortTiles);
+            cmd.SetComputeBufferParam(m_CSSplatUtilities, (int)KernelIndices.ReorderTileID, Props.TileSplatSortKeysRO, m_GpuTileSortKeys);
+            cmd.SetComputeBufferParam(m_CSSplatUtilities, (int)KernelIndices.ReorderTileID, Props.SplatViewDataRO, m_GpuView);
+            cmd.DispatchCompute(m_CSSplatUtilities, (int)KernelIndices.ReorderTileID, m_GpuTileSplatIndirect, 0);
+            // sort against tile ID
             m_TileSorterArgs.inputKeys = m_GpuTileSortTiles;
             m_Sorter.DispatchIndirect(cmd, m_TileSorterArgs);
             cmd.EndSample(s_ProfSort);
@@ -750,11 +775,6 @@ namespace GaussianSplatting.Runtime
             if (cam.cameraType == CameraType.Preview)
                 return;
 
-            cmd.SetComputeConstantBufferParam(m_CSSplatUtilities, Props.CBTileSplatCount, m_GpuTileSplatCount, 0, sizeof(uint));
-
-            cmd.SetComputeBufferParam(m_CSSplatUtilities, (int)KernelIndices.InitTileSplatIndirect, Props.TileSplatIndirect, m_GpuTileSplatIndirect);
-            cmd.DispatchCompute(m_CSSplatUtilities, (int)KernelIndices.InitTileSplatIndirect, 1, 1, 1);
-            
             int screenW = cam.pixelWidth, screenH = cam.pixelHeight;
             int tileCountW = (screenW + kSplatTileSize - 1) / kSplatTileSize;
             int tileCountH = (screenH + kSplatTileSize - 1) / kSplatTileSize;
@@ -762,9 +782,27 @@ namespace GaussianSplatting.Runtime
             
             cmd.SetBufferData(m_GpuTileRanges, m_GpuTileRangesClearData, 0, 0, tileCount);
             
+            cmd.SetComputeConstantBufferParam(m_CSSplatUtilities, Props.CBTileSplatCount, m_GpuTileSplatCount, 0, sizeof(uint));
             cmd.SetComputeBufferParam(m_CSSplatUtilities, (int)KernelIndices.CalcTileRanges, Props.TileRanges, m_GpuTileRanges);
-            cmd.SetComputeBufferParam(m_CSSplatUtilities, (int)KernelIndices.CalcTileRanges, Props.TileSplatSortTiles, m_GpuTileSortTiles);
+            cmd.SetComputeBufferParam(m_CSSplatUtilities, (int)KernelIndices.CalcTileRanges, Props.TileSplatSortTilesRO, m_GpuTileSortTiles);
             cmd.DispatchCompute(m_CSSplatUtilities, (int)KernelIndices.CalcTileRanges, m_GpuTileSplatIndirect, 0);
+        }
+        
+        internal void RenderTiles(CommandBuffer cmd, Camera cam, RTHandle target) {
+            if (cam.cameraType == CameraType.Preview)
+                return;
+
+            int screenW = cam.pixelWidth, screenH = cam.pixelHeight;
+            int tileCountW = (screenW + kSplatTileSize - 1) / kSplatTileSize;
+            int tileCountH = (screenH + kSplatTileSize - 1) / kSplatTileSize;
+
+            cmd.SetComputeVectorParam(m_CSSplatUtilities, Props.VecScreenParams, new Vector4(screenW, screenH, 0, 0));
+            cmd.SetComputeIntParams(m_CSSplatUtilities, Props.VecTileParams, new int[2]{ tileCountW, tileCountH });
+            cmd.SetComputeBufferParam(m_CSSplatUtilities, (int)KernelIndices.RenderTile, Props.TileRangesRO, m_GpuTileRanges);
+            cmd.SetComputeBufferParam(m_CSSplatUtilities, (int)KernelIndices.RenderTile, Props.TileSplatSortKeysRO, m_GpuTileSortKeys);
+            cmd.SetComputeBufferParam(m_CSSplatUtilities, (int)KernelIndices.RenderTile, Props.SplatViewDataRO, m_GpuView);
+            cmd.SetComputeTextureParam(m_CSSplatUtilities, (int)KernelIndices.RenderTile, Props.RenderTarget, target);
+            cmd.DispatchCompute(m_CSSplatUtilities, (int)KernelIndices.RenderTile, tileCountW, tileCountH, 1);
         }
         
         public void Update()

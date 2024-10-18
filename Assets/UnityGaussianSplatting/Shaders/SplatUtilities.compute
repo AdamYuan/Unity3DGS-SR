@@ -3,11 +3,18 @@
 
 #define LOG_SPLAT_TILE_SIZE 4
 #define SPLAT_TILE_SIZE (1 << LOG_SPLAT_TILE_SIZE)
+#define MAX_SPLAT_PER_TILE 256
+
+#if MAX_SPLAT_PER_TILE > SPLAT_TILE_SIZE * SPLAT_TILE_SIZE
+    #error MAX_SPLAT_PER_TILE should not exceed tile pixel count
+#endif
 
 #pragma kernel CSCalcViewData
 #pragma kernel CSCalcTileViewData
 #pragma kernel CSInitTileSplatIndirect
+#pragma kernel CSReorderTileID
 #pragma kernel CSCalcTileRanges
+#pragma kernel CSRenderTile
 #pragma kernel CSUpdateEditData
 #pragma kernel CSInitEditData
 #pragma kernel CSClearBuffer
@@ -69,6 +76,7 @@ uint FloatToSortableUint(float f)
 }
 
 RWStructuredBuffer<SplatViewData> _SplatViewData;
+StructuredBuffer<SplatViewData> _SplatViewDataRO;
 
 float _SplatScale;
 float _SplatOpacityScale;
@@ -245,7 +253,9 @@ void CSCalcViewData (uint3 id : SV_DispatchThreadID)
 
 RWStructuredBuffer<uint> _TileSplatSortDistances;
 RWStructuredBuffer<uint> _TileSplatSortTiles;
+StructuredBuffer<uint> _TileSplatSortTilesRO;
 RWStructuredBuffer<uint> _TileSplatSortKeys;
+StructuredBuffer<uint> _TileSplatSortKeysRO;
 RWStructuredBuffer<uint> _TileSplatCount;
 
 [numthreads(GROUP_SIZE,1,1)]
@@ -265,7 +275,7 @@ void CSCalcTileViewData (uint3 id : SV_DispatchThreadID)
     float splatScale = _SplatScale;
 
     // deleted?
-    if (_SplatBitsValid)
+    /* if (_SplatBitsValid)
     {
         uint wordIdx = idx / 32;
         uint bitIdx = idx & 31;
@@ -276,21 +286,21 @@ void CSCalcTileViewData (uint3 id : SV_DispatchThreadID)
 
     // cutouts
     if (IsSplatCut(splat.pos))
-        return;
+        return; */
 
-    view.pos = centerClipPos;
     bool behindCam = centerClipPos.w <= 0;
     
     if (behindCam)
         return;
     
     float2 centerUV = (centerClipPos.xy / centerClipPos.w) * 0.5 + 0.5;
-    uint centerTilePos = int2(floor(centerUV * _VecScreenParams.xy)) >> LOG_SPLAT_TILE_SIZE;
+    uint2 centerTilePos = int2(floor(centerUV * _VecScreenParams.xy)) >> LOG_SPLAT_TILE_SIZE;
     bool tileInScreen = centerTilePos < uint2(_VecTileParams);
     
     if (!tileInScreen)
         return;
-    
+
+    view.pos = float4(centerClipPos.xyz / centerClipPos.w, asfloat(GetSplatTileID(centerTilePos)));
     float4 boxRot = splat.rot;
     float3 boxSize = splat.scale;
 
@@ -303,8 +313,14 @@ void CSCalcTileViewData (uint3 id : SV_DispatchThreadID)
     cov3d1 *= splatScale2;
     float3 cov2d = CalcCovariance2D(splat.pos, cov3d0, cov3d1, _MatrixMV, _MatrixP, _VecScreenParams);
     
-    DecomposeCovariance(cov2d, view.axis1, view.axis2);
-
+    // float2 axis1, axis2;
+    // DecomposeCovariance(cov2d, axis1, axis2);
+    
+    float3 conic = CalcConic(cov2d);
+    view.axis1 = conic.xy;
+    view.axis2 = float2(conic.z, 0);
+    
+    // Color
     float3 worldViewDir = _VecWorldSpaceCameraPos.xyz - centerWorldPos;
     float3 objViewDir = mul((float3x3)_MatrixWorldToObject, worldViewDir);
     objViewDir = normalize(objViewDir);
@@ -323,7 +339,7 @@ void CSCalcTileViewData (uint3 id : SV_DispatchThreadID)
     // for sort
     _TileSplatSortKeys[tileSplatIdx] = idx;
     _TileSplatSortDistances[tileSplatIdx] = FloatToSortableUint(-centerViewPos.z);
-    _TileSplatSortTiles[tileSplatIdx] = GetSplatTileID(centerTilePos);
+    // _TileSplatSortTiles[tileSplatIdx] = GetSplatTileID(centerTilePos); // We need to reorder this afterward
 }
 
 cbuffer cbTileSplatCount : register(b0)
@@ -339,7 +355,20 @@ void CSInitTileSplatIndirect () {
     _TileSplatIndirect[2] = 1;
 }
 
+[numthreads(GROUP_SIZE,1,1)]
+void CSReorderTileID (uint3 id : SV_DispatchThreadID)
+{
+    uint idx = id.x;
+    if (idx >= e_tileSplatCount)
+        return;
+    uint splatID = _TileSplatSortKeysRO[idx];
+    uint tileID = asuint(_SplatViewDataRO[splatID].pos.w);
+    _TileSplatSortTiles[idx] = tileID;
+}
+
+
 RWStructuredBuffer<uint2> _TileRanges;
+StructuredBuffer<uint2> _TileRangesRO;
 
 [numthreads(GROUP_SIZE,1,1)]
 void CSCalcTileRanges (uint3 id : SV_DispatchThreadID)
@@ -349,8 +378,8 @@ void CSCalcTileRanges (uint3 id : SV_DispatchThreadID)
     if (idx >= e_tileSplatCount)
         return;
 
-    uint tile0 = _TileSplatSortTiles[idx];
-    uint tile1 = _TileSplatSortTiles[idx + 1];
+    uint tile0 = _TileSplatSortTilesRO[idx];
+    uint tile1 = _TileSplatSortTilesRO[idx + 1];
     // tile0 <= tile1 is guaranteed
 
     // TODO: Using shared memory might be faster?
@@ -363,6 +392,64 @@ void CSCalcTileRanges (uint3 id : SV_DispatchThreadID)
     }
 }
 
+groupshared uint2 s_tileRender_range;
+groupshared SplatViewData s_tileRender_splats[MAX_SPLAT_PER_TILE];
+
+RWTexture2D<float4> _RenderTarget;
+
+[numthreads(SPLAT_TILE_SIZE,SPLAT_TILE_SIZE,1)]
+void CSRenderTile (uint3 threadID : SV_DispatchThreadID, uint3 groupID : SV_GroupID, uint groupIndex : SV_GroupIndex)
+{
+    uint2 range;
+    if (groupIndex == 0) {
+        range = _TileRangesRO[GetSplatTileID(groupID.xy)];
+        s_tileRender_range = range;
+    }
+    GroupMemoryBarrierWithGroupSync();
+    range = s_tileRender_range;
+    if (range.y <= range.x) {
+        _RenderTarget[threadID.xy] = float4(0, 0, 0, 0);
+        return;
+    }
+
+    uint splatCount = min(range.y - range.x, MAX_SPLAT_PER_TILE);
+    if (groupIndex < splatCount) {
+        uint splatID = _TileSplatSortKeysRO[range.y - 1 - groupIndex];
+        s_tileRender_splats[groupIndex] = _SplatViewDataRO[splatID];
+    }
+    GroupMemoryBarrierWithGroupSync();
+    
+    float2 clipXY = ((threadID.xy + 0.5) / _VecScreenParams) * 2.0 - 1.0;
+    
+    float4 color = float4(0, 0, 0, 1);
+    for (uint i = 0; i < splatCount; ++i) {
+        SplatViewData view = s_tileRender_splats[i];
+        float3 conic = float3(view.axis1, view.axis2.x);
+        
+        float2 d = (view.pos.xy - clipXY) * _VecScreenParams.xy * 0.25;
+        float power = - (conic.x * d.x * d.x + conic.z * d.y * d.y) - 2.0 * conic.y * d.x * d.y;
+        
+        if (power > 0.0)
+            continue;
+        
+        float4 splatColor;
+        splatColor.r = f16tof32(view.color.x >> 16);
+        splatColor.g = f16tof32(view.color.x);
+        splatColor.b = f16tof32(view.color.y >> 16);
+        splatColor.a = f16tof32(view.color.y);
+        splatColor.a = saturate(splatColor.a * exp(power));
+        
+        color.xyz += splatColor.rgb * splatColor.a * color.a;
+        color.a *= (1.0 - splatColor.a);
+        
+        if (color.a < 1.0 / 255.0)
+            break;
+    }
+    
+    color.a = 1.0 - color.a;
+    
+    _RenderTarget[threadID.xy] = color;
+}
 
 RWByteAddressBuffer _DstBuffer;
 ByteAddressBuffer _SrcBuffer;
