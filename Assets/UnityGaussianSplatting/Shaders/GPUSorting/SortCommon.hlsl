@@ -13,7 +13,7 @@
 #pragma multi_compile __ SORT_PAIRS */
 #define KEY_UINT
 #define PAYLOAD_UINT
-// #define SHOULD_ASCEND
+#define SHOULD_ASCEND
 #define SORT_PAIRS
 
 #pragma use_dxc

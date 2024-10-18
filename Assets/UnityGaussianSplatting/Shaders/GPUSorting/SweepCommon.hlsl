@@ -32,7 +32,7 @@
 #define FLAG_MASK           3       //Mask used to retrieve flag values
 
 RWStructuredBuffer<uint> b_histIndirect, b_sortIndirect;
-RWStructuredBuffer<uint> b_numHistThreadBlocks, b_numSortThreadBlocks;
+// RWStructuredBuffer<uint> b_numHistThreadBlocks, b_numSortThreadBlocks;
 
 [numthreads(1, 1, 1)]
 void InitIndirect()
@@ -40,12 +40,12 @@ void InitIndirect()
     uint numHistThreadBlocks = (e_numKeys + G_HIST_PART_SIZE - 1) / G_HIST_PART_SIZE;
     uint numSortThreadBlocks = (e_numKeys + PART_SIZE - 1) / PART_SIZE;
     
-    b_numHistThreadBlocks[0] = numHistThreadBlocks;
+    // b_numHistThreadBlocks[0] = numHistThreadBlocks;
     b_histIndirect[0] = numHistThreadBlocks;
     b_histIndirect[1] = 1u;
     b_histIndirect[2] = 1u;
 
-    b_numSortThreadBlocks[0] = numSortThreadBlocks;
+    // b_numSortThreadBlocks[0] = numSortThreadBlocks;
     b_sortIndirect[0] = numSortThreadBlocks;
     b_sortIndirect[1] = 1u;
     b_sortIndirect[2] = 1u;
