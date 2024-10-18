@@ -1,7 +1,13 @@
 // SPDX-License-Identifier: MIT
 #define GROUP_SIZE 1024
 
+#define LOG_SPLAT_TILE_SIZE 4
+#define SPLAT_TILE_SIZE (1 << LOG_SPLAT_TILE_SIZE)
+
 #pragma kernel CSCalcViewData
+#pragma kernel CSCalcTileViewData
+#pragma kernel CSInitTileSplatIndirect
+#pragma kernel CSCalcTileRanges
 #pragma kernel CSUpdateEditData
 #pragma kernel CSInitEditData
 #pragma kernel CSClearBuffer
@@ -44,10 +50,15 @@ float4x4 _MatrixP;
 float4 _VecScreenParams;
 float4 _VecWorldSpaceCameraPos;
 int _SelectionMode;
+int2 _VecTileParams;
 
 RWStructuredBuffer<uint> _SplatSortDistances;
 RWStructuredBuffer<uint> _SplatSortKeys;
 uint _SplatCount;
+
+uint GetSplatTileID(uint2 p) {
+    return p.x + p.y * _VecTileParams.x;
+}
 
 // radix sort etc. friendly, see http://stereopsis.com/radix.html
 uint FloatToSortableUint(float f)
@@ -180,7 +191,7 @@ void CSCalcViewData (uint3 id : SV_DispatchThreadID)
 
     // for sort
     _SplatSortKeys[idx] = idx;
-    _SplatSortDistances[idx] = FloatToSortableUint(centerViewPos.z);
+    _SplatSortDistances[idx] = FloatToSortableUint(-centerViewPos.z);
 
     // deleted?
     if (_SplatBitsValid)
@@ -230,6 +241,126 @@ void CSCalcViewData (uint3 id : SV_DispatchThreadID)
     }
     
     _SplatViewData[idx] = view;
+}
+
+RWStructuredBuffer<uint> _TileSplatSortDistances;
+RWStructuredBuffer<uint> _TileSplatSortTiles;
+RWStructuredBuffer<uint> _TileSplatSortKeys;
+RWStructuredBuffer<uint> _TileSplatCount;
+
+[numthreads(GROUP_SIZE,1,1)]
+void CSCalcTileViewData (uint3 id : SV_DispatchThreadID)
+{
+    uint idx = id.x;
+    if (idx >= _SplatCount)
+        return;
+
+    SplatData splat = LoadSplatData(idx);
+    SplatViewData view = (SplatViewData)0;
+    
+    float3 centerWorldPos = mul(_MatrixObjectToWorld, float4(splat.pos, 1)).xyz;
+    float3 centerViewPos = mul(_MatrixMV, float4(splat.pos, 1)).xyz;
+    float4 centerClipPos = mul(_MatrixVP, float4(centerWorldPos, 1));
+    half opacityScale = _SplatOpacityScale;
+    float splatScale = _SplatScale;
+
+    // deleted?
+    if (_SplatBitsValid)
+    {
+        uint wordIdx = idx / 32;
+        uint bitIdx = idx & 31;
+        uint wordVal = _SplatDeletedBits.Load(wordIdx * 4);
+        if (wordVal & (1 << bitIdx))
+            return;
+    }
+
+    // cutouts
+    if (IsSplatCut(splat.pos))
+        return;
+
+    view.pos = centerClipPos;
+    bool behindCam = centerClipPos.w <= 0;
+    
+    if (behindCam)
+        return;
+    
+    float2 centerUV = (centerClipPos.xy / centerClipPos.w) * 0.5 + 0.5;
+    uint centerTilePos = int2(floor(centerUV * _VecScreenParams.xy)) >> LOG_SPLAT_TILE_SIZE;
+    bool tileInScreen = centerTilePos < uint2(_VecTileParams);
+    
+    if (!tileInScreen)
+        return;
+    
+    float4 boxRot = splat.rot;
+    float3 boxSize = splat.scale;
+
+    float3x3 splatRotScaleMat = CalcMatrixFromRotationScale(boxRot, boxSize);
+
+    float3 cov3d0, cov3d1;
+    CalcCovariance3D(splatRotScaleMat, cov3d0, cov3d1);
+    float splatScale2 = splatScale * splatScale;
+    cov3d0 *= splatScale2;
+    cov3d1 *= splatScale2;
+    float3 cov2d = CalcCovariance2D(splat.pos, cov3d0, cov3d1, _MatrixMV, _MatrixP, _VecScreenParams);
+    
+    DecomposeCovariance(cov2d, view.axis1, view.axis2);
+
+    float3 worldViewDir = _VecWorldSpaceCameraPos.xyz - centerWorldPos;
+    float3 objViewDir = mul((float3x3)_MatrixWorldToObject, worldViewDir);
+    objViewDir = normalize(objViewDir);
+
+    half4 col;
+    col.rgb = ShadeSH(splat.sh, objViewDir, _SHOrder, _SHOnly != 0);
+    col.a = min(splat.opacity * opacityScale, 65000);
+    view.color.x = (f32tof16(col.r) << 16) | f32tof16(col.g);
+    view.color.y = (f32tof16(col.b) << 16) | f32tof16(col.a);
+
+    _SplatViewData[idx] = view;
+    
+    // TODO: Might have multiple tiles    
+    uint tileSplatIdx;
+    InterlockedAdd(_TileSplatCount[0], 1u, tileSplatIdx);
+    // for sort
+    _TileSplatSortKeys[tileSplatIdx] = idx;
+    _TileSplatSortDistances[tileSplatIdx] = FloatToSortableUint(-centerViewPos.z);
+    _TileSplatSortTiles[tileSplatIdx] = GetSplatTileID(centerTilePos);
+}
+
+cbuffer cbTileSplatCount : register(b0)
+{
+    uint e_tileSplatCount;
+};
+RWStructuredBuffer<uint> _TileSplatIndirect;
+
+[numthreads(1,1,1)]
+void CSInitTileSplatIndirect () {
+    _TileSplatIndirect[0] = (e_tileSplatCount + GROUP_SIZE - 1) / GROUP_SIZE;    
+    _TileSplatIndirect[1] = 1;
+    _TileSplatIndirect[2] = 1;
+}
+
+RWStructuredBuffer<uint2> _TileRanges;
+
+[numthreads(GROUP_SIZE,1,1)]
+void CSCalcTileRanges (uint3 id : SV_DispatchThreadID)
+{
+    uint idx = id.x;
+
+    if (idx >= e_tileSplatCount)
+        return;
+
+    uint tile0 = _TileSplatSortTiles[idx];
+    uint tile1 = _TileSplatSortTiles[idx + 1];
+    // tile0 <= tile1 is guaranteed
+
+    // TODO: Using shared memory might be faster?
+    
+    if (idx == e_tileSplatCount - 1) {
+        _TileRanges[tile0].y = e_tileSplatCount;
+    } else if (tile0 < tile1) {
+        _TileRanges[tile0].y = idx + 1;
+        _TileRanges[tile1].x = idx + 1;
+    }
 }
 
 

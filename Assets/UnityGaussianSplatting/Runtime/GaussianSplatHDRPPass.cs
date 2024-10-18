@@ -13,7 +13,6 @@ namespace GaussianSplatting.Runtime
     class GaussianSplatHDRPPass : CustomPass
     {
         RTHandle m_RenderTarget;
-        RTHandle m_TileRangeRenderTarget;
 
         // It can be used to configure render targets and their clear state. Also to create temporary render target textures.
         // When empty this render pass will render to the active camera render target.
@@ -25,8 +24,6 @@ namespace GaussianSplatting.Runtime
                 colorFormat: GraphicsFormat.R16G16B16A16_SFloat, useDynamicScale: true,
                 depthBufferBits: DepthBits.None, msaaSamples: MSAASamples.None,
                 filterMode: FilterMode.Point, wrapMode: TextureWrapMode.Clamp, name: "_GaussianSplatRT");
-            
-            m_TileRangeRenderTarget = GaussianSplatRenderSystem.AllocTileRangeRTHandle("_GaussianTileRangeRT");
         }
 
         protected override void Execute(CustomPassContext ctx)
