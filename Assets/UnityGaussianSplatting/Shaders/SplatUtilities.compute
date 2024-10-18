@@ -317,13 +317,13 @@ void CSCalcTileViewData (uint3 id : SV_DispatchThreadID)
     cov3d0 *= splatScale2;
     cov3d1 *= splatScale2;
     float3 cov2d = CalcCovariance2D(splat.pos, cov3d0, cov3d1, _MatrixMV, _MatrixP, _VecScreenParams);
-    
-    // float2 axis1, axis2;
-    // DecomposeCovariance(cov2d, axis1, axis2);
-    
+
     float3 conic = CalcConic(cov2d);
     view.axis1 = conic.xy;
     view.axis2 = float2(conic.z, 0);
+    
+    float2 axis1, axis2;
+    DecomposeCovariance(cov2d, axis1, axis2);
     
     // Color
     float3 worldViewDir = _VecWorldSpaceCameraPos.xyz - centerWorldPos;
@@ -429,8 +429,8 @@ void CSRenderTile (uint3 threadID : SV_DispatchThreadID, uint3 groupID : SV_Grou
         SplatViewData view = s_tileRender_splats[i];
         float3 conic = float3(view.axis1, view.axis2.x);
         
-        float2 d = (view.pos.xy - clipXY) * _VecScreenParams.xy * 0.25;
-        float power = - (conic.x * d.x * d.x + conic.z * d.y * d.y) - 2.0 * conic.y * d.x * d.y;
+        float2 d = (view.pos.xy - clipXY) * _VecScreenParams.xy * 0.5;
+        float power = - 0.5 * (conic.x * d.x * d.x + conic.z * d.y * d.y) - conic.y * d.x * d.y;
         
         if (power > 0.0)
             continue;
