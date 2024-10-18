@@ -295,7 +295,6 @@ namespace GaussianSplatting.Runtime
         internal GraphicsBuffer m_GpuSortKeys;
 
         // Sort pairs for Tile-based Renderer
-        GraphicsBuffer m_GpuTileSortDistances;
         GraphicsBuffer m_GpuTileSortTiles;
         GraphicsBuffer m_GpuTileSortKeys;
         // Other data for Tile-based Renderer
@@ -503,7 +502,6 @@ namespace GaussianSplatting.Runtime
             m_GpuSortKeys?.Dispose();
             m_SorterArgs.resources.Dispose();
 
-            DisposeBuffer(ref m_GpuTileSortDistances);
             DisposeBuffer(ref m_GpuTileSortTiles);
             DisposeBuffer(ref m_GpuTileSortKeys);
             m_TileSorterArgs.resources.Dispose();
@@ -517,10 +515,10 @@ namespace GaussianSplatting.Runtime
             if (m_Sorter.Valid)
                 m_SorterArgs.resources = GpuSorting.SupportResources.Load((uint)count);
 
-            m_GpuTileSortDistances = new GraphicsBuffer(GraphicsBuffer.Target.Structured, count * kMaxTilesPerSplat, 4) { name = "GaussianSplatTileSortDistances" };
             m_GpuTileSortTiles = new GraphicsBuffer(GraphicsBuffer.Target.Structured, count * kMaxTilesPerSplat, 4) { name = "GaussianSplatTileSortTiles" };
             m_GpuTileSortKeys = new GraphicsBuffer(GraphicsBuffer.Target.Structured, count * kMaxTilesPerSplat, 4) { name = "GaussianSplatTileSortIndices" };
 
+            m_TileSorterArgs.inputKeys = m_GpuTileSortTiles;
             m_TileSorterArgs.inputValues = m_GpuTileSortKeys;
             m_TileSorterArgs.count = m_GpuTileSplatCount;
             if (m_Sorter.Valid)
@@ -606,7 +604,6 @@ namespace GaussianSplatting.Runtime
             DisposeBuffer(ref m_GpuSortDistances);
             DisposeBuffer(ref m_GpuSortKeys);
 
-            DisposeBuffer(ref m_GpuTileSortDistances);
             DisposeBuffer(ref m_GpuTileSortTiles);
             DisposeBuffer(ref m_GpuTileSortKeys);
             DisposeBuffer(ref m_GpuTileSplatCount);
@@ -728,8 +725,7 @@ namespace GaussianSplatting.Runtime
             cmb.SetComputeIntParam(m_CSSplatUtilities, Props.SHOrder, m_SHOrder);
             cmb.SetComputeIntParam(m_CSSplatUtilities, Props.SHOnly, m_SHOnly ? 1 : 0);
 
-            cmb.SetComputeBufferParam(m_CSSplatUtilities, (int)KernelIndices.CalcTileViewData, Props.TileSplatSortDistances, m_GpuTileSortDistances);
-            // cmb.SetComputeBufferParam(m_CSSplatUtilities, (int)KernelIndices.CalcTileViewData, Props.TileSplatSortTiles, m_GpuTileSortTiles);
+            cmb.SetComputeBufferParam(m_CSSplatUtilities, (int)KernelIndices.CalcTileViewData, Props.TileSplatSortDistances, m_GpuTileSortTiles);
             cmb.SetComputeBufferParam(m_CSSplatUtilities, (int)KernelIndices.CalcTileViewData, Props.TileSplatSortKeys, m_GpuTileSortKeys);
             cmb.SetComputeBufferParam(m_CSSplatUtilities, (int)KernelIndices.CalcTileViewData, Props.TileSplatCount, m_GpuTileSplatCount);
             
@@ -743,7 +739,7 @@ namespace GaussianSplatting.Runtime
             cmb.DispatchCompute(m_CSSplatUtilities, (int)KernelIndices.CalcTileViewData, (m_GpuView.count + (int)gsX - 1) / (int)gsX, 1, 1);
 
             // Generate Indirect Buffer for the Count           
-            cmb.SetComputeConstantBufferParam(m_CSSplatUtilities, Props.CBTileSplatCount, m_GpuTileSplatCount, 0, sizeof(uint));
+            cmb.SetComputeIntParam(m_CSSplatUtilities, Props.SplatCount, m_SplatCount);
             cmb.SetComputeBufferParam(m_CSSplatUtilities, (int)KernelIndices.InitTileSplatIndirect, Props.TileSplatCount, m_GpuTileSplatCount);
             cmb.SetComputeBufferParam(m_CSSplatUtilities, (int)KernelIndices.InitTileSplatIndirect, Props.TileSplatIndirect, m_GpuTileSplatIndirect);
             cmb.DispatchCompute(m_CSSplatUtilities, (int)KernelIndices.InitTileSplatIndirect, 1, 1, 1);
@@ -758,7 +754,6 @@ namespace GaussianSplatting.Runtime
             cmd.BeginSample(s_ProfSort);
             m_Sorter.BeforeDispatchIndirect(cmd, m_TileSorterArgs);
             // sort against distance
-            m_TileSorterArgs.inputKeys = m_GpuTileSortDistances;
             m_Sorter.DispatchIndirect(cmd, m_TileSorterArgs);
             // reorder tile ID
             cmd.SetComputeBufferParam(m_CSSplatUtilities, (int)KernelIndices.ReorderTileID, Props.TileSplatSortTiles, m_GpuTileSortTiles);
@@ -766,7 +761,6 @@ namespace GaussianSplatting.Runtime
             cmd.SetComputeBufferParam(m_CSSplatUtilities, (int)KernelIndices.ReorderTileID, Props.SplatViewDataRO, m_GpuView);
             cmd.DispatchCompute(m_CSSplatUtilities, (int)KernelIndices.ReorderTileID, m_GpuTileSplatIndirect, 0);
             // sort against tile ID
-            m_TileSorterArgs.inputKeys = m_GpuTileSortTiles;
             m_Sorter.DispatchIndirect(cmd, m_TileSorterArgs);
             cmd.EndSample(s_ProfSort);
         }

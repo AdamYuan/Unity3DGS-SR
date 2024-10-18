@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: MIT
 #define GROUP_SIZE 1024
 
-#define LOG_SPLAT_TILE_SIZE 4
-#define SPLAT_TILE_SIZE (1 << LOG_SPLAT_TILE_SIZE)
-#define MAX_SPLAT_PER_TILE 256
+#define MAX_TILE_PER_SPLAT 4 // kMaxTilesPerSplat
+#define LOG_SPLAT_TILE_SIZE 4 // log_2(kSplatTileSize)
+#define SPLAT_TILE_SIZE (1 << LOG_SPLAT_TILE_SIZE) // kSplatTileSize
+#define MAX_SPLAT_PER_TILE 128 // Max splats loaded for a tile when rendering
 
 #if MAX_SPLAT_PER_TILE > SPLAT_TILE_SIZE * SPLAT_TILE_SIZE
     #error MAX_SPLAT_PER_TILE should not exceed tile pixel count
@@ -58,6 +59,10 @@ float4 _VecScreenParams;
 float4 _VecWorldSpaceCameraPos;
 int _SelectionMode;
 int2 _VecTileParams;
+cbuffer cbTileSplatCount : register(b0)
+{
+    uint e_tileSplatCount;
+};
 
 RWStructuredBuffer<uint> _SplatSortDistances;
 RWStructuredBuffer<uint> _SplatSortKeys;
@@ -339,18 +344,16 @@ void CSCalcTileViewData (uint3 id : SV_DispatchThreadID)
     // for sort
     _TileSplatSortKeys[tileSplatIdx] = idx;
     _TileSplatSortDistances[tileSplatIdx] = FloatToSortableUint(-centerViewPos.z);
-    // _TileSplatSortTiles[tileSplatIdx] = GetSplatTileID(centerTilePos); // We need to reorder this afterward
 }
 
-cbuffer cbTileSplatCount : register(b0)
-{
-    uint e_tileSplatCount;
-};
 RWStructuredBuffer<uint> _TileSplatIndirect;
 
 [numthreads(1,1,1)]
 void CSInitTileSplatIndirect () {
-    _TileSplatIndirect[0] = (e_tileSplatCount + GROUP_SIZE - 1) / GROUP_SIZE;    
+    uint count = _TileSplatCount[0];
+    count = min(count, MAX_TILE_PER_SPLAT * _SplatCount);
+    _TileSplatCount[0] = count;
+    _TileSplatIndirect[0] = (count + GROUP_SIZE - 1) / GROUP_SIZE;    
     _TileSplatIndirect[1] = 1;
     _TileSplatIndirect[2] = 1;
 }
