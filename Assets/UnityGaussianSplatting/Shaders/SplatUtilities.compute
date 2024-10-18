@@ -263,6 +263,10 @@ RWStructuredBuffer<uint> _TileSplatSortKeys;
 StructuredBuffer<uint> _TileSplatSortKeysRO;
 RWStructuredBuffer<uint> _TileSplatCount;
 
+uint GetMaxTileSplatCount() {
+    return MAX_TILE_PER_SPLAT * _SplatCount;
+}
+
 [numthreads(GROUP_SIZE,1,1)]
 void CSCalcTileViewData (uint3 id : SV_DispatchThreadID)
 {
@@ -299,7 +303,8 @@ void CSCalcTileViewData (uint3 id : SV_DispatchThreadID)
         return;
     
     float2 centerUV = (centerClipPos.xy / centerClipPos.w) * 0.5 + 0.5;
-    uint2 centerTilePos = int2(floor(centerUV * _VecScreenParams.xy)) >> LOG_SPLAT_TILE_SIZE;
+    float2 centerScreenPos = centerUV * _VecScreenParams.xy;
+    uint2 centerTilePos = int2(floor(centerScreenPos)) >> LOG_SPLAT_TILE_SIZE;
     bool tileInScreen = centerTilePos < uint2(_VecTileParams);
     
     if (!tileInScreen)
@@ -351,7 +356,7 @@ RWStructuredBuffer<uint> _TileSplatIndirect;
 [numthreads(1,1,1)]
 void CSInitTileSplatIndirect () {
     uint count = _TileSplatCount[0];
-    count = min(count, MAX_TILE_PER_SPLAT * _SplatCount);
+    count = min(count, GetMaxTileSplatCount());
     _TileSplatCount[0] = count;
     _TileSplatIndirect[0] = (count + GROUP_SIZE - 1) / GROUP_SIZE;    
     _TileSplatIndirect[1] = 1;
@@ -417,7 +422,7 @@ void CSRenderTile (uint3 threadID : SV_DispatchThreadID, uint3 groupID : SV_Grou
 
     uint splatCount = min(range.y - range.x, MAX_SPLAT_PER_TILE);
     if (groupIndex < splatCount) {
-        uint splatID = _TileSplatSortKeysRO[range.y - 1 - groupIndex];
+        uint splatID = _TileSplatSortKeysRO[range.x + groupIndex];
         s_tileRender_splats[groupIndex] = _SplatViewDataRO[splatID];
     }
     GroupMemoryBarrierWithGroupSync();
