@@ -255,7 +255,8 @@ namespace GaussianSplatting.Runtime
             Tile
         }
 
-        public const int kSplatTileSize = 16; // For tile-based renderer
+        public const int kLogSplatTileSize = 4; // For tile-based renderer
+        public const int kSplatTileSize = 1 << kLogSplatTileSize; // For tile-based renderer
         public const int kMaxTilesPerSplat = 4; // For tile-based renderer
         public const int kMaxTilesOnScreen = 1920 * 1080 * 4 / kSplatTileSize / kSplatTileSize; // Max possible tiles on screen
 
