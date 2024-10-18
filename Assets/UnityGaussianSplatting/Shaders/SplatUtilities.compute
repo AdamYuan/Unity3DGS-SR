@@ -81,7 +81,9 @@ uint FloatToSortableUint(float f)
 }
 
 RWStructuredBuffer<SplatViewData> _SplatViewData;
-StructuredBuffer<SplatViewData> _SplatViewDataRO;
+
+RWStructuredBuffer<SplatTileViewData> _SplatTileViewData;
+StructuredBuffer<SplatTileViewData> _SplatTileViewDataRO;
 
 float _SplatScale;
 float _SplatOpacityScale;
@@ -159,6 +161,16 @@ void DecomposeCovariance(float3 cov2d, out float2 v1, out float2 v2)
     v2 = min(sqrt(2.0 * lambda2), maxSize) * float2(diagVec.y, -diagVec.x);
 
     #endif
+}
+
+float Calc2DRadius(float3 cov2d) {
+    // https://github.com/graphdeco-inria/diff-gaussian-rasterization/blob/main/cuda_rasterizer/forward.cu
+    float mid = 0.5f * (cov2d.x + cov2d.z);
+    float det = cov2d.x * cov2d.z - cov2d.y * cov2d.y;
+    float lambda1 = mid + sqrt(max(0.1, mid * mid - det));
+    float lambda2 = mid - sqrt(max(0.1, mid * mid - det));
+    float radius = ceil(3.0 * sqrt(max(lambda1, lambda2)));
+    return radius;
 }
 
 bool IsSplatCut(float3 pos)
@@ -275,7 +287,6 @@ void CSCalcTileViewData (uint3 id : SV_DispatchThreadID)
         return;
 
     SplatData splat = LoadSplatData(idx);
-    SplatViewData view = (SplatViewData)0;
     
     float3 centerWorldPos = mul(_MatrixObjectToWorld, float4(splat.pos, 1)).xyz;
     float3 centerViewPos = mul(_MatrixMV, float4(splat.pos, 1)).xyz;
@@ -305,12 +316,11 @@ void CSCalcTileViewData (uint3 id : SV_DispatchThreadID)
     float2 centerUV = (centerClipPos.xy / centerClipPos.w) * 0.5 + 0.5;
     float2 centerScreenPos = centerUV * _VecScreenParams.xy;
     uint2 centerTilePos = int2(floor(centerScreenPos)) >> LOG_SPLAT_TILE_SIZE;
+
     bool tileInScreen = centerTilePos < uint2(_VecTileParams);
-    
     if (!tileInScreen)
         return;
 
-    view.pos = float4(centerClipPos.xyz / centerClipPos.w, asfloat(GetSplatTileID(centerTilePos)));
     float4 boxRot = splat.rot;
     float3 boxSize = splat.scale;
 
@@ -323,25 +333,42 @@ void CSCalcTileViewData (uint3 id : SV_DispatchThreadID)
     cov3d1 *= splatScale2;
     float3 cov2d = CalcCovariance2D(splat.pos, cov3d0, cov3d1, _MatrixMV, _MatrixP, _VecScreenParams);
 
-    float3 conic = CalcConic(cov2d);
-    view.axis1 = conic.xy;
-    view.axis2 = float2(conic.z, 0);
-    
-    float2 axis1, axis2;
-    DecomposeCovariance(cov2d, axis1, axis2);
-    
+    float det = cov2d.x * cov2d.z - cov2d.y * cov2d.y;
+    if(det == 0.0)
+        return;
+
+    float radius = Calc2DRadius(cov2d);
+    float2 minScreenPos = centerScreenPos - radius, maxScreenPos = centerScreenPos + radius;
+
+    // Tile
+    int2 minTilePos = int2(floor(minScreenPos)) >> LOG_SPLAT_TILE_SIZE;
+    int2 maxTilePos = int2(floor(maxScreenPos)) >> LOG_SPLAT_TILE_SIZE;
+    minTilePos = max(minTilePos, 0);
+    maxTilePos = min(maxTilePos, _VecTileParams.xy - 1);
+    if (maxTilePos.x < minTilePos.x || maxTilePos.y < minTilePos.y)
+        return;
+    uint2 tileExtent = maxTilePos - minTilePos + 1;
+    uint tileCount = tileExtent.x * tileExtent.y;
+
     // Color
     float3 worldViewDir = _VecWorldSpaceCameraPos.xyz - centerWorldPos;
     float3 objViewDir = mul((float3x3)_MatrixWorldToObject, worldViewDir);
     objViewDir = normalize(objViewDir);
-
     half4 col;
     col.rgb = ShadeSH(splat.sh, objViewDir, _SHOrder, _SHOnly != 0);
     col.a = min(splat.opacity * opacityScale, 65000);
+
+    SplatTileViewData view = (SplatTileViewData)0;
+    view.clip = centerClipPos.xy / centerClipPos.w;
+    // view.tileMin = minTilePos.x | minTilePos.y << 16u;
+    view.tileMin = GetSplatTileID(centerTilePos);
+    view.tileExtent = tileExtent.x | tileExtent.y << 16u;
+    view.conic = CalcConic(cov2d);
+    view.tileCounter = 0;
     view.color.x = (f32tof16(col.r) << 16) | f32tof16(col.g);
     view.color.y = (f32tof16(col.b) << 16) | f32tof16(col.a);
 
-    _SplatViewData[idx] = view;
+    _SplatTileViewData[idx] = view;
     
     // TODO: Might have multiple tiles    
     uint tileSplatIdx;
@@ -370,7 +397,8 @@ void CSReorderTileID (uint3 id : SV_DispatchThreadID)
     if (idx >= e_tileSplatCount)
         return;
     uint splatID = _TileSplatSortKeysRO[idx];
-    uint tileID = asuint(_SplatViewDataRO[splatID].pos.w);
+    SplatTileViewData view = _SplatTileViewData[splatID];
+    uint tileID = view.tileMin;
     _TileSplatSortTiles[idx] = tileID;
 }
 
@@ -401,7 +429,7 @@ void CSCalcTileRanges (uint3 id : SV_DispatchThreadID)
 }
 
 groupshared uint2 s_tileRender_range;
-groupshared SplatViewData s_tileRender_splats[MAX_SPLAT_PER_TILE];
+groupshared SplatTileViewData s_tileRender_splats[MAX_SPLAT_PER_TILE];
 
 RWTexture2D<float4> _RenderTarget;
 
@@ -423,7 +451,7 @@ void CSRenderTile (uint3 threadID : SV_DispatchThreadID, uint3 groupID : SV_Grou
     uint splatCount = min(range.y - range.x, MAX_SPLAT_PER_TILE);
     if (groupIndex < splatCount) {
         uint splatID = _TileSplatSortKeysRO[range.x + groupIndex];
-        s_tileRender_splats[groupIndex] = _SplatViewDataRO[splatID];
+        s_tileRender_splats[groupIndex] = _SplatTileViewDataRO[splatID];
     }
     GroupMemoryBarrierWithGroupSync();
     
@@ -431,10 +459,10 @@ void CSRenderTile (uint3 threadID : SV_DispatchThreadID, uint3 groupID : SV_Grou
     
     float4 color = float4(0, 0, 0, 1);
     for (uint i = 0; i < splatCount; ++i) {
-        SplatViewData view = s_tileRender_splats[i];
-        float3 conic = float3(view.axis1, view.axis2.x);
+        SplatTileViewData view = s_tileRender_splats[i];
+        float3 conic = view.conic;
         
-        float2 d = (view.pos.xy - clipXY) * _VecScreenParams.xy * 0.5;
+        float2 d = (view.clip - clipXY) * _VecScreenParams.xy * 0.5;
         float power = - 0.5 * (conic.x * d.x * d.x + conic.z * d.y * d.y) - conic.y * d.x * d.y;
         
         if (power > 0.0)

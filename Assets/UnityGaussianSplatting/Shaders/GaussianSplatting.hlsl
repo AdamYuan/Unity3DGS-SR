@@ -614,4 +614,14 @@ struct SplatViewData
     uint2 color; // 4xFP16
 };
 
+struct SplatTileViewData
+{
+    float2 clip;
+    uint tileMin;
+    uint tileExtent;
+    float3 conic;
+    uint tileCounter;
+    uint2 color; // 4xFP16
+};
+
 #endif // GAUSSIAN_SPLATTING_HLSL
