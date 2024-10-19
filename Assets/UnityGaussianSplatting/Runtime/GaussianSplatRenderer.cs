@@ -695,6 +695,8 @@ namespace GaussianSplatting.Runtime
 
         internal void CalcTileViewData(CommandBuffer cmb, Camera cam)
         {
+            Debug.Assert(m_SplatCount <= 0xFFFFFFu); // We need to pack 8-bit tile offset upon 24-bit splat ID
+
             if (cam.cameraType == CameraType.Preview)
                 return;
 
@@ -781,8 +783,8 @@ namespace GaussianSplatting.Runtime
             m_Sorter.DispatchIndirect(cmd, m_TileSorterArgs);
             // reorder tile ID
             cmd.SetComputeBufferParam(m_CSSplatUtilities, (int)KernelIndices.ReorderTileID, Props.TileSplatSortTiles, m_GpuTileSortTileDist);
-            cmd.SetComputeBufferParam(m_CSSplatUtilities, (int)KernelIndices.ReorderTileID, Props.TileSplatSortKeysRO, m_GpuTileSortKeys);
-            cmd.SetComputeBufferParam(m_CSSplatUtilities, (int)KernelIndices.ReorderTileID, Props.SplatTileViewData, m_GpuView);
+            cmd.SetComputeBufferParam(m_CSSplatUtilities, (int)KernelIndices.ReorderTileID, Props.TileSplatSortKeys, m_GpuTileSortKeys);
+            cmd.SetComputeBufferParam(m_CSSplatUtilities, (int)KernelIndices.ReorderTileID, Props.SplatTileViewDataRO, m_GpuView);
             cmd.DispatchCompute(m_CSSplatUtilities, (int)KernelIndices.ReorderTileID, m_GpuTileSplatIndirect, 0);
             // sort against tile ID
             m_Sorter.DispatchIndirect(cmd, m_TileSorterArgs);

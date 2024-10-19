@@ -5,6 +5,8 @@
 #define LOG_SPLAT_TILE_SIZE 4 // log_2(kSplatTileSize)
 #define SPLAT_TILE_SIZE (1 << LOG_SPLAT_TILE_SIZE) // kSplatTileSize
 
+#define MAX_TILE_PER_SPLAT 256 // Pack 8 bits upon splat ID
+
 #pragma kernel CSCalcViewData
 #pragma kernel CSCalcTileViewData
 #pragma kernel CSInitTileSplatIndirect
@@ -343,6 +345,9 @@ void CSCalcTileViewData (uint3 id : SV_DispatchThreadID)
         return;
     uint2 tileExtent = maxTilePos - minTilePos + 1;
     uint tileCount = tileExtent.x * tileExtent.y;
+    
+    if (tileCount > MAX_TILE_PER_SPLAT)
+        return;
 
     // Color
     float3 worldViewDir = _VecWorldSpaceCameraPos.xyz - centerWorldPos;
@@ -371,7 +376,7 @@ void CSCalcTileViewData (uint3 id : SV_DispatchThreadID)
         return;
 
     for (uint i = 0; i < tileCount; ++i) {
-        _TileSplatSortKeys[tileSplatOffset + i] = idx;
+        _TileSplatSortKeys[tileSplatOffset + i] = idx | (i << 24u);
         _TileSplatSortDistances[tileSplatOffset + i] = FloatToSortableUint(-centerViewPos.z);
     }
 }
@@ -394,11 +399,12 @@ void CSReorderTileID (uint3 id : SV_DispatchThreadID)
     uint idx = id.x;
     if (idx >= e_tileSplatCount)
         return;
-    uint splatID = _TileSplatSortKeysRO[idx];
-    SplatTileViewData view = _SplatTileViewData[splatID];
-    uint tileOffset;
-    InterlockedAdd(_SplatTileViewData[splatID].tileCounter, 1u, tileOffset);
-    
+    uint splatID = _TileSplatSortKeys[idx];
+    uint tileOffset = splatID >> 24u;
+    splatID &= 0xFFFFFFu;
+    _TileSplatSortKeys[idx] = splatID;
+
+    SplatTileViewData view = _SplatTileViewDataRO[splatID];
     uint2 tileMin = uint2(view.tileMin & 0xFFFF, view.tileMin >> 16u);
     uint2 tileExtent = uint2(view.tileExtent & 0xFFFF, view.tileExtent >> 16u);
     uint2 tilePos = uint2(tileMin.x + tileOffset % tileExtent.x, tileMin.y + tileOffset / tileExtent.x);
