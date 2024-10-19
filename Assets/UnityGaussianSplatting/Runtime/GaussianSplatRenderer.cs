@@ -775,19 +775,20 @@ namespace GaussianSplatting.Runtime
         {
             if (cam.cameraType == CameraType.Preview)
                 return;
-
+            
             // sort the splats
             cmd.BeginSample(s_ProfSort);
             m_Sorter.BeforeDispatchIndirect(cmd, m_TileSorterArgs);
             // sort against distance
-            m_Sorter.DispatchIndirect(cmd, m_TileSorterArgs);
+            m_Sorter.DispatchIndirect(cmd, m_TileSorterArgs, 24);
             // reorder tile ID
             cmd.SetComputeBufferParam(m_CSSplatUtilities, (int)KernelIndices.ReorderTileID, Props.TileSplatSortTiles, m_GpuTileSortTileDist);
             cmd.SetComputeBufferParam(m_CSSplatUtilities, (int)KernelIndices.ReorderTileID, Props.TileSplatSortKeys, m_GpuTileSortKeys);
             cmd.SetComputeBufferParam(m_CSSplatUtilities, (int)KernelIndices.ReorderTileID, Props.SplatTileViewDataRO, m_GpuView);
             cmd.DispatchCompute(m_CSSplatUtilities, (int)KernelIndices.ReorderTileID, m_GpuTileSplatIndirect, 0);
             // sort against tile ID
-            m_Sorter.DispatchIndirect(cmd, m_TileSorterArgs);
+            Debug.Assert(kMaxTilesOnScreen < 65536);
+            m_Sorter.DispatchIndirect(cmd, m_TileSorterArgs, 16);
             cmd.EndSample(s_ProfSort);
         }
 

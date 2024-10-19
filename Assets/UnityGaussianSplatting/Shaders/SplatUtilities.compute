@@ -5,7 +5,7 @@
 #define LOG_SPLAT_TILE_SIZE 4 // log_2(kSplatTileSize)
 #define SPLAT_TILE_SIZE (1 << LOG_SPLAT_TILE_SIZE) // kSplatTileSize
 
-#define MAX_TILE_PER_SPLAT 256 // Pack 8 bits upon splat ID
+#define MAX_TILE_PER_SPLAT 0xFFFF // Pack 8 bits upon splat ID and 8 bits upon distance
 
 #pragma kernel CSCalcViewData
 #pragma kernel CSCalcTileViewData
@@ -376,8 +376,9 @@ void CSCalcTileViewData (uint3 id : SV_DispatchThreadID)
         return;
 
     for (uint i = 0; i < tileCount; ++i) {
-        _TileSplatSortKeys[tileSplatOffset + i] = idx | (i << 24u);
-        _TileSplatSortDistances[tileSplatOffset + i] = FloatToSortableUint(-centerViewPos.z);
+        _TileSplatSortKeys[tileSplatOffset + i] = idx | (i << 24);
+        uint d = FloatToSortableUint(-centerViewPos.z);
+        _TileSplatSortDistances[tileSplatOffset + i] = (d >> 8) | ((i >> 8) << 24);
     }
 }
 
@@ -400,7 +401,7 @@ void CSReorderTileID (uint3 id : SV_DispatchThreadID)
     if (idx >= e_tileSplatCount)
         return;
     uint splatID = _TileSplatSortKeys[idx];
-    uint tileOffset = splatID >> 24u;
+    uint tileOffset = splatID >> 24 | (_TileSplatSortTiles[idx] >> 24) << 8;
     splatID &= 0xFFFFFFu;
     _TileSplatSortKeys[idx] = splatID;
 

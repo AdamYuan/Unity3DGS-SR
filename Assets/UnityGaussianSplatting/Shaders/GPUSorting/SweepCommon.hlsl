@@ -18,6 +18,7 @@
 #pragma kernel InitSweep
 #pragma kernel GlobalHistogram
 #pragma kernel Scan
+#pragma kernel Copy
 
 #define G_HIST_PART_SIZE    32768U  //The size of a GlobalHistogram partition tile.
 #define G_HIST_DIM          128U    //The number of threads in a global hist threadblock
@@ -31,7 +32,9 @@
 #define FLAG_INCLUSIVE      2       //Flag value indicating inclusive sum of a partition tile is ready
 #define FLAG_MASK           3       //Mask used to retrieve flag values
 
-RWStructuredBuffer<uint> b_histIndirect, b_sortIndirect;
+#define COPY_DIM            1024
+
+RWStructuredBuffer<uint> b_histIndirect, b_sortIndirect, b_copyIndirect;
 // RWStructuredBuffer<uint> b_numHistThreadBlocks, b_numSortThreadBlocks;
 
 [numthreads(1, 1, 1)]
@@ -39,6 +42,7 @@ void InitIndirect()
 {
     uint numHistThreadBlocks = (e_numKeys + G_HIST_PART_SIZE - 1) / G_HIST_PART_SIZE;
     uint numSortThreadBlocks = (e_numKeys + PART_SIZE - 1) / PART_SIZE;
+    uint numCopyThreadBlocks = (e_numKeys + COPY_DIM - 1) / COPY_DIM;
     
     // b_numHistThreadBlocks[0] = numHistThreadBlocks;
     b_histIndirect[0] = numHistThreadBlocks;
@@ -49,6 +53,19 @@ void InitIndirect()
     b_sortIndirect[0] = numSortThreadBlocks;
     b_sortIndirect[1] = 1u;
     b_sortIndirect[2] = 1u;
+
+    b_copyIndirect[0] = numCopyThreadBlocks;
+    b_copyIndirect[1] = 1u;
+    b_copyIndirect[2] = 1u;
+}
+
+[numthreads(COPY_DIM, 1, 1)]
+void Copy(uint3 id : SV_DispatchThreadID) {
+    if (id.x >= e_numKeys)
+        return;
+
+    b_alt[id.x] = b_sort[id.x];
+    b_altPayload[id.x] = b_sortPayload[id.x];
 }
 
 RWStructuredBuffer<uint> b_globalHist;                  //buffer holding device level offsets for each binning pass
