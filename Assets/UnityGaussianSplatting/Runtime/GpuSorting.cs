@@ -224,7 +224,8 @@ namespace GaussianSplatting.Runtime
             GraphicsBuffer toSortPayload,
             GraphicsBuffer alt,
             GraphicsBuffer altPayload,
-            int bits)
+            int bits,
+            bool copyIfFlip)
         {
             cmd.SetComputeConstantBufferParam(m_CS, "cbGpuSortingNumThreadBlocks", numSortThreadBlocks, 0, sizeof(uint));
             cmd.DispatchCompute(m_CS, m_kernelInit, 256, 1, 1);
@@ -250,7 +251,7 @@ namespace GaussianSplatting.Runtime
                 flip = !flip;
             }
 
-            if (flip) {
+            if (flip && copyIfFlip) {
                 // Copy _alt to _toSort
                 cmd.SetComputeBufferParam(m_CS, m_kernelCopy, "b_sort", toSort);
                 cmd.SetComputeBufferParam(m_CS, m_kernelCopy, "b_sortPayload", toSortPayload);
@@ -298,7 +299,7 @@ namespace GaussianSplatting.Runtime
             cmd.DispatchCompute(m_CS, m_kernelInitIndirect, 1, 1, 1);
         }
 
-        public void DispatchIndirect(CommandBuffer cmd, IndirectArgs args, int bits = 32)
+        public void DispatchIndirect(CommandBuffer cmd, IndirectArgs args, int bits = 32, bool copyIfFlip = true)
         {
             cmd.EnableKeyword(m_CS, m_indirectKeyword);
             Assert.IsTrue(Valid);
@@ -322,7 +323,8 @@ namespace GaussianSplatting.Runtime
                 args.inputValues,
                 args.resources.tempKeyBuffer,
                 args.resources.tempPayloadBuffer,
-                bits);
+                bits,
+                copyIfFlip);
         }
     }
 }

@@ -424,7 +424,7 @@ void CSReorderTileID (uint3 id : SV_DispatchThreadID)
     if (idx >= e_tileSplatCount)
         return;
     uint splatID = _TileSplatSortKeysRO[idx];
-    uint tileOffset = splatID >> 24 | (_TileSplatSortTiles[idx] >> 24) << 8;
+    uint tileOffset = splatID >> 24 | (_TileSplatSortTilesRO[idx] >> 24) << 8;
     splatID &= 0xFFFFFFu;
 
     SplatTileViewData view = _SplatTileViewDataRO[splatID];
@@ -433,6 +433,7 @@ void CSReorderTileID (uint3 id : SV_DispatchThreadID)
     UnpackSplatTileInfo(view.tileInfo, tileMin, tileWidth);
     uint2 tilePos = uint2(tileMin.x + tileOffset % tileWidth, tileMin.y + tileOffset / tileWidth);
     _TileSplatSortTiles[idx] = GetSplatTileID(tilePos);
+    _TileSplatSortKeys[idx] = splatID;
 }
 
 
@@ -495,7 +496,7 @@ void CSRenderTile (uint3 threadID : SV_DispatchThreadID, uint3 groupID : SV_Grou
 
         uint curSplatCount = min(splatCount - splatOffset, SPLAT_TILE_SIZE * SPLAT_TILE_SIZE);
         if (groupIndex < curSplatCount) {
-            uint splatID = _TileSplatSortKeysRO[range.x + splatOffset + groupIndex] & 0xFFFFFFu;
+            uint splatID = _TileSplatSortKeysRO[range.x + splatOffset + groupIndex];
             s_tileRender_splats[groupIndex] = _SplatTileViewDataRO[splatID];
         }
         GroupMemoryBarrierWithGroupSync();
