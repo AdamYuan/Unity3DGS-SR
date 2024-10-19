@@ -180,7 +180,7 @@ void CSCalcViewData (uint3 id : SV_DispatchThreadID)
 
     // for sort
     _SplatSortKeys[idx] = idx;
-    _SplatSortDistances[idx] = FloatToSortableUint(centerViewPos.z);
+    _SplatSortDistances[idx] = FloatToSortableUint(-centerViewPos.z);
 
     // deleted?
     if (_SplatBitsValid)
