@@ -257,7 +257,7 @@ namespace GaussianSplatting.Runtime
 
         public const int kLogSplatTileSize = 4; // For tile-based renderer
         public const int kSplatTileSize = 1 << kLogSplatTileSize; // For tile-based renderer
-        public const int kMaxTilesPerSplat = 4; // For tile-based renderer
+        public const int kSplatTileBufferRatio = 4; // For tile-based renderer
         public const int kMaxTilesOnScreen = 1920 * 1080 * 4 / kSplatTileSize / kSplatTileSize; // Max possible tiles on screen
 
         public GaussianSplatAsset m_Asset;
@@ -517,14 +517,14 @@ namespace GaussianSplatting.Runtime
             if (m_Sorter.Valid)
                 m_SorterArgs.resources = GpuSorting.SupportResources.Load((uint)count);
 
-            m_GpuTileSortTileDist = new GraphicsBuffer(GraphicsBuffer.Target.Structured, count * kMaxTilesPerSplat, 4) { name = "GaussianSplatTileSortTileDist" };
-            m_GpuTileSortKeys = new GraphicsBuffer(GraphicsBuffer.Target.Structured, count * kMaxTilesPerSplat, 4) { name = "GaussianSplatTileSortIndices" };
+            m_GpuTileSortTileDist = new GraphicsBuffer(GraphicsBuffer.Target.Structured, count * kSplatTileBufferRatio, 4) { name = "GaussianSplatTileSortTileDist" };
+            m_GpuTileSortKeys = new GraphicsBuffer(GraphicsBuffer.Target.Structured, count * kSplatTileBufferRatio, 4) { name = "GaussianSplatTileSortIndices" };
 
             m_TileSorterArgs.inputKeys = m_GpuTileSortTileDist;
             m_TileSorterArgs.inputValues = m_GpuTileSortKeys;
             m_TileSorterArgs.count = m_GpuTileSplatCount;
             if (m_Sorter.Valid)
-                m_TileSorterArgs.resources = GpuSorting.SupportResources.LoadIndirect((uint)count * kMaxTilesPerSplat);
+                m_TileSorterArgs.resources = GpuSorting.SupportResources.LoadIndirect((uint)count * kSplatTileBufferRatio);
         }
 
         public void OnEnable()
