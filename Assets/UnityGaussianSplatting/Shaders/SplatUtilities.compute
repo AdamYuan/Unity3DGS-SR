@@ -69,6 +69,18 @@ uint GetSplatTileID(uint2 p) {
     return p.x + p.y * _VecTileParams.x;
 }
 
+uint PackSplatTileInfo(uint2 tileMin, uint tileWidth) {
+    return tileMin.x | tileMin.y << 10u | tileWidth << 20u;
+}
+
+void UnpackSplatTileInfo(uint packed, out uint2 o_tileMin, out uint o_tileWidth) {
+    o_tileMin.x = packed & 0x3FFu;
+    packed >>= 10u;
+    o_tileMin.y = packed & 0x3FFu;
+    packed >>= 10u;
+    o_tileWidth = packed;
+}
+
 // radix sort etc. friendly, see http://stereopsis.com/radix.html
 uint FloatToSortableUint(float f)
 {
@@ -162,12 +174,24 @@ void DecomposeCovariance(float3 cov2d, out float2 v1, out float2 v2)
 
 float Calc2DRadius(float3 cov2d) {
     // https://github.com/graphdeco-inria/diff-gaussian-rasterization/blob/main/cuda_rasterizer/forward.cu
-    float mid = 0.5f * (cov2d.x + cov2d.z);
-    float det = cov2d.x * cov2d.z - cov2d.y * cov2d.y;
-    float lambda1 = mid + sqrt(max(0.1, mid * mid - det));
-    float lambda2 = mid - sqrt(max(0.1, mid * mid - det));
-    float radius = ceil(3.0 * sqrt(max(lambda1, lambda2)));
-    return radius;
+    float diag1 = cov2d.x, diag2 = cov2d.z, offDiag = cov2d.y;
+    float mid = 0.5f * (diag1 + diag2);
+    float radius = length(float2((diag1 - diag2) / 2.0, offDiag));
+    float lambda1 = mid + radius;
+    float lambda2 = max(mid - radius, 0.1);
+    return 3.0 * sqrt(max(lambda1, lambda2));
+}
+
+float2 Calc2DRect(float3 cov2d) {
+    float diag1 = cov2d.x, diag2 = cov2d.z, offDiag = cov2d.y;
+    float mid = 0.5f * (diag1 + diag2);
+    float radius = length(float2((diag1 - diag2) / 2.0, offDiag));
+    float lambda1 = mid + radius;
+    float lambda2 = max(mid - radius, 0.1);
+    float2 diagVec = normalize(float2(offDiag, lambda1 - diag1));
+    float2 v1 = sqrt(lambda1) * diagVec;
+    float2 v2 = sqrt(lambda2) * float2(diagVec.y, -diagVec.x);
+    return 3.0 * (abs(v1) + abs(v2));
 }
 
 bool IsSplatCut(float3 pos)
@@ -310,12 +334,14 @@ void CSCalcTileViewData (uint3 id : SV_DispatchThreadID)
     if (behindCam)
         return;
     
-    float2 centerUV = (centerClipPos.xy / centerClipPos.w) * 0.5 + 0.5;
+    centerClipPos /= centerClipPos.w;
+    
+    bool outsideFrustum = any(abs(centerClipPos.xyz) > 1.3); // TODO: Is this portable?
+    if (outsideFrustum)
+        return;
+    
+    float2 centerUV = centerClipPos.xy * 0.5 + 0.5;
     float2 centerScreenPos = centerUV * _VecScreenParams.xy;
-    /* uint2 centerTilePos = int2(floor(centerScreenPos)) >> LOG_SPLAT_TILE_SIZE;
-    bool tileInScreen = centerTilePos < uint2(_VecTileParams);
-    if (!tileInScreen)
-        return; */
 
     float4 boxRot = splat.rot;
     float3 boxSize = splat.scale;
@@ -333,15 +359,15 @@ void CSCalcTileViewData (uint3 id : SV_DispatchThreadID)
     if(det == 0.0)
         return;
 
-    float radius = Calc2DRadius(cov2d);
-    float2 minScreenPos = centerScreenPos - radius, maxScreenPos = centerScreenPos + radius;
+    float2 rect = Calc2DRect(cov2d);
+    float2 minScreenPos = centerScreenPos - rect, maxScreenPos = centerScreenPos + rect;
 
     // Tile
     int2 minTilePos = int2(floor(minScreenPos)) >> LOG_SPLAT_TILE_SIZE;
     int2 maxTilePos = int2(floor(maxScreenPos)) >> LOG_SPLAT_TILE_SIZE;
     minTilePos = max(minTilePos, 0);
     maxTilePos = min(maxTilePos, _VecTileParams.xy - 1);
-    if (maxTilePos.x < minTilePos.x || maxTilePos.y < minTilePos.y)
+    if (any(maxTilePos < minTilePos))
         return;
     uint2 tileExtent = maxTilePos - minTilePos + 1;
     uint tileCount = tileExtent.x * tileExtent.y;
@@ -359,16 +385,13 @@ void CSCalcTileViewData (uint3 id : SV_DispatchThreadID)
 
     SplatTileViewData view = (SplatTileViewData)0;
     view.clip = centerClipPos.xy / centerClipPos.w;
-    view.tileMin = minTilePos.x | minTilePos.y << 16u;
-    view.tileExtent = tileExtent.x | tileExtent.y << 16u;
+    view.tileInfo = PackSplatTileInfo(minTilePos, tileExtent.x);
     view.conic = CalcConic(cov2d);
-    view.tileCounter = 0;
     view.color.x = (f32tof16(col.r) << 16) | f32tof16(col.g);
     view.color.y = (f32tof16(col.b) << 16) | f32tof16(col.a);
 
     _SplatTileViewData[idx] = view;
     
-    // TODO: Might have multiple tiles    
     uint tileSplatOffset;
     InterlockedAdd(_TileSplatCount[0], tileCount, tileSplatOffset);
     
@@ -400,15 +423,15 @@ void CSReorderTileID (uint3 id : SV_DispatchThreadID)
     uint idx = id.x;
     if (idx >= e_tileSplatCount)
         return;
-    uint splatID = _TileSplatSortKeys[idx];
+    uint splatID = _TileSplatSortKeysRO[idx];
     uint tileOffset = splatID >> 24 | (_TileSplatSortTiles[idx] >> 24) << 8;
     splatID &= 0xFFFFFFu;
-    _TileSplatSortKeys[idx] = splatID;
 
     SplatTileViewData view = _SplatTileViewDataRO[splatID];
-    uint2 tileMin = uint2(view.tileMin & 0xFFFF, view.tileMin >> 16u);
-    uint2 tileExtent = uint2(view.tileExtent & 0xFFFF, view.tileExtent >> 16u);
-    uint2 tilePos = uint2(tileMin.x + tileOffset % tileExtent.x, tileMin.y + tileOffset / tileExtent.x);
+    uint2 tileMin;
+    uint tileWidth;
+    UnpackSplatTileInfo(view.tileInfo, tileMin, tileWidth);
+    uint2 tilePos = uint2(tileMin.x + tileOffset % tileWidth, tileMin.y + tileOffset / tileWidth);
     _TileSplatSortTiles[idx] = GetSplatTileID(tilePos);
 }
 
@@ -440,6 +463,7 @@ void CSCalcTileRanges (uint3 id : SV_DispatchThreadID)
 
 groupshared uint2 s_tileRender_range;
 groupshared SplatTileViewData s_tileRender_splats[SPLAT_TILE_SIZE * SPLAT_TILE_SIZE];
+groupshared uint s_tileRender_doneCnt;
 
 RWTexture2D<float4> _RenderTarget;
 
@@ -450,6 +474,7 @@ void CSRenderTile (uint3 threadID : SV_DispatchThreadID, uint3 groupID : SV_Grou
     if (groupIndex == 0) {
         range = _TileRangesRO[GetSplatTileID(groupID.xy)];
         s_tileRender_range = range;
+        // s_tileRender_doneCnt = 0;
     }
     GroupMemoryBarrierWithGroupSync();
     range = s_tileRender_range;
@@ -459,37 +484,49 @@ void CSRenderTile (uint3 threadID : SV_DispatchThreadID, uint3 groupID : SV_Grou
     }
 
     float4 color = float4(0, 0, 0, 1);
+    bool done = false;
     float2 clipXY = ((threadID.xy + 0.5) / _VecScreenParams) * 2.0 - 1.0;
 
     uint splatCount = range.y - range.x;
     
     for (uint splatOffset = 0; splatOffset < splatCount; splatOffset += SPLAT_TILE_SIZE * SPLAT_TILE_SIZE) {
+        // if (s_tileRender_doneCnt == SPLAT_TILE_SIZE * SPLAT_TILE_SIZE)
+        //     break;
+
         uint curSplatCount = min(splatCount - splatOffset, SPLAT_TILE_SIZE * SPLAT_TILE_SIZE);
         if (groupIndex < curSplatCount) {
-            uint splatID = _TileSplatSortKeysRO[range.x + splatOffset + groupIndex];
+            uint splatID = _TileSplatSortKeysRO[range.x + splatOffset + groupIndex] & 0xFFFFFFu;
             s_tileRender_splats[groupIndex] = _SplatTileViewDataRO[splatID];
         }
         GroupMemoryBarrierWithGroupSync();
         
-        for (uint i = 0; i < curSplatCount && color.a > 1.0 / 255.0; ++i) {
-            SplatTileViewData view = s_tileRender_splats[i];
-            float3 conic = view.conic;
-            
-            float2 d = (view.clip - clipXY) * _VecScreenParams.xy * 0.5;
-            float power = - 0.5 * (conic.x * d.x * d.x + conic.z * d.y * d.y) - conic.y * d.x * d.y;
-            
-            if (power >= 0.0)
-                continue;
-            
-            float4 splatColor;
-            splatColor.r = f16tof32(view.color.x >> 16);
-            splatColor.g = f16tof32(view.color.x);
-            splatColor.b = f16tof32(view.color.y >> 16);
-            splatColor.a = f16tof32(view.color.y);
-            splatColor.a = saturate(splatColor.a * exp(power));
-            
-            color.xyz += splatColor.rgb * splatColor.a * color.a;
-            color.a *= (1.0 - splatColor.a);
+        if (!done) {
+            for (uint i = 0; i < curSplatCount; ++i) {
+                SplatTileViewData view = s_tileRender_splats[i];
+                float3 conic = view.conic;
+                
+                float2 d = (view.clip - clipXY) * _VecScreenParams.xy * 0.5;
+                float power = - 0.5 * (conic.x * d.x * d.x + conic.z * d.y * d.y) - conic.y * d.x * d.y;
+                
+                if (power >= 0.0)
+                    continue;
+                
+                float4 splatColor;
+                splatColor.r = f16tof32(view.color.x >> 16);
+                splatColor.g = f16tof32(view.color.x);
+                splatColor.b = f16tof32(view.color.y >> 16);
+                splatColor.a = f16tof32(view.color.y);
+                splatColor.a = saturate(splatColor.a * exp(power));
+                
+                color.xyz += splatColor.rgb * splatColor.a * color.a;
+                color.a *= (1.0 - splatColor.a);
+                
+                if (color.a < 1.0 / 255.0) {
+                    done = true;
+                    // InterlockedAdd(s_tileRender_doneCnt, 1u);
+                    break;
+                }
+            }
         }
         GroupMemoryBarrierWithGroupSync();
     }

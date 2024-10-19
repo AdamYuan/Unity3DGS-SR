@@ -783,7 +783,7 @@ namespace GaussianSplatting.Runtime
             m_Sorter.DispatchIndirect(cmd, m_TileSorterArgs, 24);
             // reorder tile ID
             cmd.SetComputeBufferParam(m_CSSplatUtilities, (int)KernelIndices.ReorderTileID, Props.TileSplatSortTiles, m_GpuTileSortTileDist);
-            cmd.SetComputeBufferParam(m_CSSplatUtilities, (int)KernelIndices.ReorderTileID, Props.TileSplatSortKeys, m_GpuTileSortKeys);
+            cmd.SetComputeBufferParam(m_CSSplatUtilities, (int)KernelIndices.ReorderTileID, Props.TileSplatSortKeysRO, m_GpuTileSortKeys);
             cmd.SetComputeBufferParam(m_CSSplatUtilities, (int)KernelIndices.ReorderTileID, Props.SplatTileViewDataRO, m_GpuView);
             cmd.DispatchCompute(m_CSSplatUtilities, (int)KernelIndices.ReorderTileID, m_GpuTileSplatIndirect, 0);
             // sort against tile ID
