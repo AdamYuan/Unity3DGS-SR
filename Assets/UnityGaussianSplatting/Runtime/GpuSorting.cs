@@ -18,6 +18,7 @@ namespace GaussianSplatting.Runtime
         protected const int k_maxSize = 65535 * k_partitionSize;
 
         protected const int k_globalHistPartSize = 32768;
+        protected const int k_copyDim = 1024;
 
         public struct Args
         {
@@ -185,11 +186,14 @@ namespace GaussianSplatting.Runtime
         private void Dispatch(
             int numThreadBlocks,
             int globalHistThreadBlocks,
+            int numCopyBlocks,
             CommandBuffer cmd,
             GraphicsBuffer toSort,
             GraphicsBuffer toSortPayload,
             GraphicsBuffer alt,
-            GraphicsBuffer altPayload)
+            GraphicsBuffer altPayload,
+            int bits,
+            bool copyIfFlip)
         {
             cmd.SetComputeIntParam(m_CS, "e_threadBlocks", numThreadBlocks);
             cmd.DispatchCompute(m_CS, m_kernelInit, 256, 1, 1);
@@ -199,7 +203,9 @@ namespace GaussianSplatting.Runtime
 
             cmd.SetComputeIntParam(m_CS, "e_threadBlocks", numThreadBlocks);
             cmd.DispatchCompute(m_CS, m_kernelScan, k_radixPasses, 1, 1);
-            for (int radixShift = 0; radixShift < 32; radixShift += 8)
+
+            bool flip = false;
+            for (int radixShift = 0; radixShift < bits; radixShift += 8)
             {
                 cmd.SetComputeIntParam(m_CS, "e_radixShift", radixShift);
                 cmd.SetComputeBufferParam(m_CS, m_digitBinningPass, "b_sort", toSort);
@@ -210,6 +216,16 @@ namespace GaussianSplatting.Runtime
 
                 (toSort, alt) = (alt, toSort);
                 (toSortPayload, altPayload) = (altPayload, toSortPayload);
+                flip = !flip;
+            }
+
+            if (flip && copyIfFlip) {
+                // Copy _alt to _toSort
+                cmd.SetComputeBufferParam(m_CS, m_kernelCopy, "b_sort", toSort);
+                cmd.SetComputeBufferParam(m_CS, m_kernelCopy, "b_sortPayload", toSortPayload);
+                cmd.SetComputeBufferParam(m_CS, m_kernelCopy, "b_alt", alt);
+                cmd.SetComputeBufferParam(m_CS, m_kernelCopy, "b_altPayload", altPayload);
+                cmd.DispatchCompute(m_CS, m_kernelCopy, numCopyBlocks, 1, 1);
             }
         }
 
@@ -261,13 +277,14 @@ namespace GaussianSplatting.Runtime
             }
         }
 
-        public void Dispatch(CommandBuffer cmd, Args args)
+        public void Dispatch(CommandBuffer cmd, Args args, int bits = 32, bool copyIfFlip = true)
         {
             Assert.IsTrue(Valid);
             cmd.DisableKeyword(m_CS, m_indirectKeyword);
 
             int threadBlocks = (int)DivRoundUp(args.count, k_partitionSize);
             int globalHistThreadBlocks = (int)DivRoundUp(args.count, k_globalHistPartSize);
+            int copyThreadBlocks = (int)DivRoundUp(args.count, k_copyDim);
 
             SetStaticRootParameters(
                 (int)args.count,
@@ -280,11 +297,14 @@ namespace GaussianSplatting.Runtime
             Dispatch(
                 threadBlocks,
                 globalHistThreadBlocks,
+                copyThreadBlocks,
                 cmd,
                 args.inputKeys,
                 args.inputValues,
                 args.resources.tempKeyBuffer,
-                args.resources.tempPayloadBuffer);
+                args.resources.tempPayloadBuffer,
+                bits,
+                copyIfFlip);
         }
 
         public void BeforeDispatchIndirect(CommandBuffer cmd, IndirectArgs args)
