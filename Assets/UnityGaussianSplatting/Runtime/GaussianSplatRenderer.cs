@@ -257,7 +257,7 @@ namespace GaussianSplatting.Runtime
 
         public const int kLogSplatTileSize = 4; // For tile-based renderer
         public const int kSplatTileSize = 1 << kLogSplatTileSize; // For tile-based renderer
-        public const int kSplatTileBufferRatio = 4; // For tile-based renderer
+        public const int kSplatTileBufferRatio = 3; // For tile-based renderer
         public const int kMaxTilesOnScreen = 1920 * 1080 * 4 / kSplatTileSize / kSplatTileSize; // Max possible tiles on screen
 
         public GaussianSplatAsset m_Asset;
