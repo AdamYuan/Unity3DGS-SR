@@ -343,17 +343,10 @@ void CSCalcTileViewData (uint3 id : SV_DispatchThreadID)
     float2 centerUV = centerClipPos.xy * 0.5 + 0.5;
     float2 centerScreenPos = centerUV * _VecScreenParams.xy;
 
-    float4 boxRot = splat.rot;
-    float3 boxSize = splat.scale;
-
-    float3x3 splatRotScaleMat = CalcMatrixFromRotationScale(boxRot, boxSize);
-
-    float3 cov3d0, cov3d1;
-    CalcCovariance3D(splatRotScaleMat, cov3d0, cov3d1);
-    float splatScale2 = splatScale * splatScale;
-    cov3d0 *= splatScale2;
-    cov3d1 *= splatScale2;
-    float3 cov2d = CalcCovariance2D(splat.pos, cov3d0, cov3d1, _MatrixMV, _MatrixP, _VecScreenParams);
+    float2 axis1, axis2;
+    float3 cov2d = CalcSHGridCovariance2D(splat.pos, splat.rot, splat.scale, 
+                        _MatrixMV, _MatrixP, _VecScreenParams.x, splatScale, 
+                        axis1, axis2);
 
     float det = cov2d.x * cov2d.z - cov2d.y * cov2d.y;
     if(det == 0.0)

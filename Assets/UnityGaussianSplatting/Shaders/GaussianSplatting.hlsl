@@ -28,21 +28,27 @@ float4 QuatInverse(float4 q)
 
 float3x3 CalcMatrixFromRotationScale(float4 rot, float3 scale)
 {
-    float3x3 ms = float3x3(
+    /* float3x3 ms = float3x3(
         scale.x, 0, 0,
         0, scale.y, 0,
         0, 0, scale.z
-    );
+    ); */
     float x = rot.x;
     float y = rot.y;
     float z = rot.z;
     float w = rot.w;
-    float3x3 mr = float3x3(
+    float sx = scale.x, sy = scale.y, sz = scale.z;
+    /* float3x3 mr = float3x3(
         1-2*(y*y + z*z),   2*(x*y - w*z),   2*(x*z + w*y),
           2*(x*y + w*z), 1-2*(x*x + z*z),   2*(y*z - w*x),
           2*(x*z - w*y),   2*(y*z + w*x), 1-2*(x*x + y*y)
     );
-    return mul(mr, ms);
+    return mul(mr, ms); */
+    return float3x3(
+        (1-2*(y*y + z*z))*sx,     2*(x*y - w*z)*sy,     2*(x*z + w*y)*sz,
+            2*(x*y + w*z)*sx, (1-2*(x*x + z*z))*sy,     2*(y*z - w*x)*sz,
+            2*(x*z - w*y)*sx,     2*(y*z + w*x)*sy, (1-2*(x*x + y*y))*sz
+    );
 }
 
 void CalcCovariance3D(float3x3 rotMat, out float3 sigma0, out float3 sigma1)
@@ -87,6 +93,60 @@ float3 CalcCovariance2D(float3 worldPos, float3 cov3d0, float3 cov3d1, float4x4 
     cov._m00 += 0.3;
     cov._m11 += 0.3;
     return float3(cov._m00, cov._m01, cov._m11);
+}
+
+// Find the top-2 eigen vector, for [shgrid]
+float3 CalcSHGridCovariance2D(float3 worldPos, float4 rot, float3 scale,
+                              float4x4 matrixV, float4x4 matrixP, float screenW, float splatScale,
+                              out float2 o_axis1, out float2 o_axis2)
+{
+    float3x3 rotMat = CalcMatrixFromRotationScale(rot, scale);
+    
+    float4x4 viewMatrix = matrixV;
+    float3 viewPos = mul(viewMatrix, float4(worldPos, 1)).xyz;
+
+    // this is needed in order for splats that are visible in view but clipped "quite a lot" to work
+    float aspect = matrixP._m00 / matrixP._m11;
+    float tanFovX = rcp(matrixP._m00);
+    float tanFovY = rcp(matrixP._m11 * aspect);
+    float limX = 1.3 * tanFovX;
+    float limY = 1.3 * tanFovY;
+    viewPos.x = clamp(viewPos.x / viewPos.z, -limX, limX) * viewPos.z;
+    viewPos.y = clamp(viewPos.y / viewPos.z, -limY, limY) * viewPos.z;
+
+    float focal = screenW * matrixP._m00 / 2;
+
+    float3x3 J = float3x3(
+        focal / viewPos.z, 0, -(focal * viewPos.x) / (viewPos.z * viewPos.z),
+        0, focal / viewPos.z, -(focal * viewPos.y) / (viewPos.z * viewPos.z),
+        0, 0, 0
+    );
+    float3x3 W = (float3x3)viewMatrix;
+
+    float3x3 S = mul(J, mul(W, rotMat));
+
+    if (scale.x < scale.y && scale.x < scale.z) {
+        o_axis1 = float2(S._m01, S._m11) * splatScale;
+        o_axis2 = float2(S._m02, S._m12) * splatScale;
+    } else if (scale.y < scale.z) {
+        o_axis1 = float2(S._m02, S._m12) * splatScale;
+        o_axis2 = float2(S._m00, S._m10) * splatScale;
+    } else {
+        o_axis1 = float2(S._m00, S._m10) * splatScale;
+        o_axis2 = float2(S._m01, S._m11) * splatScale;
+    }
+
+    float3x3 cov = mul(S, transpose(S));
+    
+    float3 cov2d = float3(cov._m00, cov._m01, cov._m11);
+    float splatScale2 = splatScale * splatScale;
+    cov2d *= splatScale2;
+
+    // Low pass filter to make each splat at least 1px size.
+    cov2d[0] += 0.3;
+    cov2d[2] += 0.3;
+    
+    return cov2d;
 }
 
 float3 CalcConic(float3 cov2d)
