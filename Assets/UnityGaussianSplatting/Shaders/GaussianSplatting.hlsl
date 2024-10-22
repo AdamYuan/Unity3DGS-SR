@@ -95,10 +95,18 @@ float3 CalcCovariance2D(float3 worldPos, float3 cov3d0, float3 cov3d1, float4x4 
     return float3(cov._m00, cov._m01, cov._m11);
 }
 
+float2x2 CalcInverse2x2(float2x2 A)
+{
+    float det = determinant(A);
+    float2x2 C = float2x2( A._m11, -A._m01,
+                          -A._m10,  A._m00);
+    return C * rcp(det);
+}
+
 // Find the top-2 eigen vector, for [shgrid]
 float3 CalcSHGridCovariance2D(float3 worldPos, float4 rot, float3 scale,
                               float4x4 matrixV, float4x4 matrixP, float screenW, float splatScale,
-                              out float2 o_axis1, out float2 o_axis2)
+                              out float2x2 o_invAxis)
 {
     float3x3 rotMat = CalcMatrixFromRotationScale(rot, scale);
     
@@ -123,20 +131,25 @@ float3 CalcSHGridCovariance2D(float3 worldPos, float4 rot, float3 scale,
     );
     float3x3 W = (float3x3)viewMatrix;
 
-    float3x3 S = mul(J, mul(W, rotMat));
+    float3x3 M = mul(J, mul(W, rotMat));
 
+    // Find top-2 eigen vector with largest scale in world space
+    float2 axis1, axis2;
     if (scale.x < scale.y && scale.x < scale.z) {
-        o_axis1 = float2(S._m01, S._m11) * splatScale;
-        o_axis2 = float2(S._m02, S._m12) * splatScale;
+        axis1 = M._m01_m11 * splatScale;
+        axis2 = M._m02_m12 * splatScale;
     } else if (scale.y < scale.z) {
-        o_axis1 = float2(S._m02, S._m12) * splatScale;
-        o_axis2 = float2(S._m00, S._m10) * splatScale;
+        axis1 = M._m02_m12 * splatScale;
+        axis2 = M._m00_m10 * splatScale;
     } else {
-        o_axis1 = float2(S._m00, S._m10) * splatScale;
-        o_axis2 = float2(S._m01, S._m11) * splatScale;
+        axis1 = M._m00_m10 * splatScale;
+        axis2 = M._m01_m11 * splatScale;
     }
+    o_invAxis = CalcInverse2x2(float2x2(
+        axis1.x, axis2.x,
+        axis1.y, axis2.y));
 
-    float3x3 cov = mul(S, transpose(S));
+    float3x3 cov = mul(M, transpose(M));
     
     float3 cov2d = float3(cov._m00, cov._m01, cov._m11);
     float splatScale2 = splatScale * splatScale;
@@ -676,9 +689,10 @@ struct SplatViewData
 
 struct SplatTileViewData
 {
-    float2 clip;
     uint2 color; // 4xFP16
-    float3 conic;
+    uint2 conic; // 3xFP16, 1xFP16 padding
+    uint2 invAxis; // 4xFP16
+    uint clipXY; // 2xFP16
     uint tileInfo;
 };
 

@@ -343,10 +343,10 @@ void CSCalcTileViewData (uint3 id : SV_DispatchThreadID)
     float2 centerUV = centerClipPos.xy * 0.5 + 0.5;
     float2 centerScreenPos = centerUV * _VecScreenParams.xy;
 
-    float2 axis1, axis2;
+    float2x2 invAxis;
     float3 cov2d = CalcSHGridCovariance2D(splat.pos, splat.rot, splat.scale, 
                         _MatrixMV, _MatrixP, _VecScreenParams.x, splatScale, 
-                        axis1, axis2);
+                        invAxis);
 
     float det = cov2d.x * cov2d.z - cov2d.y * cov2d.y;
     if(det == 0.0)
@@ -377,9 +377,13 @@ void CSCalcTileViewData (uint3 id : SV_DispatchThreadID)
     col.a = min(splat.opacity * opacityScale, 65000);
 
     SplatTileViewData view = (SplatTileViewData)0;
-    view.clip = centerClipPos.xy / centerClipPos.w;
+    view.clipXY = f32tof16(centerClipPos.x) | (f32tof16(centerClipPos.y) << 16);
     view.tileInfo = PackSplatTileInfo(minTilePos, tileExtent.x);
-    view.conic = CalcConic(cov2d);
+    float3 conic = CalcConic(cov2d);
+    view.conic.x = f32tof16(conic.x) | (f32tof16(conic.y) << 16);
+    view.conic.y = f32tof16(conic.z);
+    view.invAxis.x = f32tof16(invAxis[0].x) | (f32tof16(invAxis[0].y) << 16);
+    view.invAxis.y = f32tof16(invAxis[1].x) | (f32tof16(invAxis[1].y) << 16);
     view.color.x = (f32tof16(col.r) << 16) | f32tof16(col.g);
     view.color.y = (f32tof16(col.b) << 16) | f32tof16(col.a);
 
@@ -497,18 +501,29 @@ void CSRenderTile (uint3 threadID : SV_DispatchThreadID, uint3 groupID : SV_Grou
         if (!done) {
             for (uint i = 0; i < curSplatCount; ++i) {
                 SplatTileViewData view = s_tileRender_splats[i];
-                float3 conic = view.conic;
-                
-                float2 d = (view.clip - clipXY) * _VecScreenParams.xy * 0.5;
+                float2 splatClipXY = float2(f16tof32(view.clipXY), f16tof32(view.clipXY >> 16u));
+                float3 conic = float3(f16tof32(view.conic.x), f16tof32(view.conic.x >> 16), f16tof32(view.conic.y));
+                float2x2 invAxis = float2x2(
+                    f16tof32(view.invAxis.x), f16tof32(view.invAxis.x >> 16),
+                    f16tof32(view.invAxis.y), f16tof32(view.invAxis.y >> 16)
+                );
+
+                float2 d = (splatClipXY - clipXY) * _VecScreenParams.xy * 0.5;
                 float power = - 0.5 * (conic.x * d.x * d.x + conic.z * d.y * d.y) - conic.y * d.x * d.y;
                 
                 if (power >= 0.0)
                     continue;
                 
+                float2 a = mul(invAxis, d);
+                
                 float4 splatColor;
                 splatColor.r = f16tof32(view.color.x >> 16);
                 splatColor.g = f16tof32(view.color.x);
                 splatColor.b = f16tof32(view.color.y >> 16);
+                /* if (all(a > 0))
+                    splatColor.rgb = float3(1, min(a, 1));
+                else if (all(a < 0))
+                    splatColor.rgb = float3(0, 0, 1); */
                 splatColor.a = f16tof32(view.color.y);
                 splatColor.a = saturate(splatColor.a * exp(power));
                 
