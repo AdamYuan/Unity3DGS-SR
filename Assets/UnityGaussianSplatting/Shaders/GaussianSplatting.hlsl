@@ -693,7 +693,7 @@ struct SplatTileViewData
     uint2 conic; // 3xFP16, 1xFP16 padding
     uint2 invAxis; // 4xFP16
     uint clipXY; // 2xFP16
-    uint tileInfo;
+    uint padding;
 };
 
 #endif // GAUSSIAN_SPLATTING_HLSL
