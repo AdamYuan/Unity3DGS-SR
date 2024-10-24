@@ -616,9 +616,9 @@ struct SplatViewData
 
 struct SplatTileViewData
 {
-    float2 clip;
     uint2 color; // 4xFP16
-    float3 conic;
+    uint2 conic; // 3xFP16, 1xFP16 padding
+    uint clipXY; // 2xFP16
     uint padding;
 };
 
