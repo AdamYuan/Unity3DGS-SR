@@ -39,22 +39,22 @@ namespace GaussianSplatting.Runtime
             if (!system.GatherSplatsForCamera(cam))
                 return;
 
-            ctx.cmd.SetGlobalTexture(m_RenderTarget.name, m_RenderTarget.nameID);
-
             Material matComposite;
 
             if (m_RenderMode == GaussianSplatRenderMode.Quad)
-            {
+            {   
                 CoreUtils.SetRenderTarget(ctx.cmd, m_RenderTarget, ctx.cameraDepthBuffer, ClearFlag.Color,
                     new Color(0, 0, 0, 0));
 
                 // add sorting, view calc and drawing commands for each splat object
-                matComposite = GaussianSplatRenderSystem.instance.SortAndRenderSplats(ctx.hdCamera.camera, ctx.cmd);
+                matComposite = GaussianSplatRenderSystem.instance.SortAndRenderSplats(ctx.hdCamera.camera, ctx.cmd, m_Scale);
             }
             else
             {
                 matComposite = GaussianSplatRenderSystem.instance.TileSortAndRenderSplats(ctx.hdCamera.camera, ctx.cmd, m_RenderTarget, m_Scale);
             }
+
+            ctx.cmd.SetGlobalTexture(m_RenderTarget.name, m_RenderTarget.nameID);
 
             // compose
             ctx.cmd.BeginSample(GaussianSplatRenderSystem.s_ProfCompose);

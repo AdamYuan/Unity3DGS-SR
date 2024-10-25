@@ -106,7 +106,7 @@ namespace GaussianSplatting.Runtime
         }
 
         // ReSharper disable once MemberCanBePrivate.Global - used by HDRP/URP features that are not always compiled
-        public Material SortAndRenderSplats(Camera cam, CommandBuffer cmb)
+        public Material SortAndRenderSplats(Camera cam, CommandBuffer cmb, float scale = 1.0f)
         {
             Material matComposite = null;
             foreach (var kvp in m_ActiveSplats)
@@ -145,7 +145,7 @@ namespace GaussianSplatting.Runtime
 
                 cmb.BeginSample(s_ProfCalcView);
                 // gs.CalcTileViewData(cmb, cam);
-                gs.CalcViewData(cmb, cam, matrix);
+                gs.CalcViewData(cmb, cam, matrix, scale);
                 cmb.EndSample(s_ProfCalcView);
 
                 // sort
@@ -645,7 +645,7 @@ namespace GaussianSplatting.Runtime
             DestroyImmediate(m_MatDebugBoxes);
         }
 
-        internal void CalcViewData(CommandBuffer cmb, Camera cam, Matrix4x4 matrix)
+        internal void CalcViewData(CommandBuffer cmb, Camera cam, Matrix4x4 matrix, float scale = 1.0f)
         {
             if (cam.cameraType == CameraType.Preview)
                 return;
@@ -656,9 +656,12 @@ namespace GaussianSplatting.Runtime
             Matrix4x4 matProj = GL.GetGPUProjectionMatrix(cam.projectionMatrix, true);
             Matrix4x4 matO2W = tr.localToWorldMatrix;
             Matrix4x4 matW2O = tr.worldToLocalMatrix;
-            int screenW = cam.pixelWidth, screenH = cam.pixelHeight;
-            Vector4 screenPar = new(screenW, screenH, 0, 0);
+            int screenW = (int)Math.Ceiling(cam.pixelWidth * scale);
+            int screenH = (int)Math.Ceiling(cam.pixelHeight * scale);
+            Vector4 screenPar = new(cam.pixelWidth, cam.pixelHeight, 0, 0); // Use original screen size for _VecScreenParams
             Vector4 camPos = cam.transform.position;
+            
+            cmb.SetViewport(new Rect(0, 0, screenW, screenH));
 
             // calculate view dependent data for each splat
             SetAssetDataOnCS(cmb, KernelIndices.CalcViewData);
@@ -711,7 +714,7 @@ namespace GaussianSplatting.Runtime
             int screenH = (int)Math.Ceiling(cam.pixelHeight * scale);
             int tileCountW = (screenW + kSplatTileSize - 1) / kSplatTileSize;
             int tileCountH = (screenH + kSplatTileSize - 1) / kSplatTileSize;
-            Vector4 screenPar = new(screenW, screenH, 0, 0);
+            Vector4 screenPar = new(screenW, screenH, 0, scale);
             Vector4 camPos = cam.transform.position;
 
             // calculate view dependent data for each splat
