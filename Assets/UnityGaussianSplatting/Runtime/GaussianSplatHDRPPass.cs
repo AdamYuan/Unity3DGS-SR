@@ -15,6 +15,8 @@ namespace GaussianSplatting.Runtime
         RTHandle m_RenderTarget;
 
         public GaussianSplatRenderMode m_RenderMode;
+        [Range(0.5f, 1.0f)]
+        public float m_Scale = 1.0f;
 
         // It can be used to configure render targets and their clear state. Also to create temporary render target textures.
         // When empty this render pass will render to the active camera render target.
@@ -51,7 +53,7 @@ namespace GaussianSplatting.Runtime
             }
             else
             {
-                matComposite = GaussianSplatRenderSystem.instance.TileSortAndRenderSplats(ctx.hdCamera.camera, ctx.cmd, m_RenderTarget);
+                matComposite = GaussianSplatRenderSystem.instance.TileSortAndRenderSplats(ctx.hdCamera.camera, ctx.cmd, m_RenderTarget, m_Scale);
             }
 
             // compose

@@ -173,7 +173,7 @@ namespace GaussianSplatting.Runtime
         }
 
         // ReSharper disable once MemberCanBePrivate.Global - used by HDRP/URP features that are not always compiled
-        public Material TileSortAndRenderSplats(Camera cam, CommandBuffer cmb, RTHandle target)
+        public Material TileSortAndRenderSplats(Camera cam, CommandBuffer cmb, RTHandle target, float scale = 1.0f)
         {
             Material matComposite = null;
             foreach (var kvp in m_ActiveSplats)
@@ -187,13 +187,13 @@ namespace GaussianSplatting.Runtime
                 kvp.Item2.Clear();
 
                 cmb.BeginSample(s_ProfCalcView);
-                gs.CalcTileViewData(cmb, cam);
+                gs.CalcTileViewData(cmb, cam, scale);
                 cmb.EndSample(s_ProfCalcView);
 
                 gs.SortTilePoints(cmb, cam);
-                gs.CalcTileRanges(cmb, cam);
+                gs.CalcTileRanges(cmb, cam, scale);
 
-                gs.RenderTiles(cmb, cam, target);
+                gs.RenderTiles(cmb, cam, target, scale);
             }
             return matComposite;
         }
@@ -386,6 +386,7 @@ namespace GaussianSplatting.Runtime
             public static readonly int MatrixObjectToWorld = Shader.PropertyToID("_MatrixObjectToWorld");
             public static readonly int MatrixWorldToObject = Shader.PropertyToID("_MatrixWorldToObject");
             public static readonly int VecScreenParams = Shader.PropertyToID("_VecScreenParams");
+            public static readonly int IScreenWH = Shader.PropertyToID("_IScreenWH");
             public static readonly int VecTileParams = Shader.PropertyToID("_VecTileParams");
             public static readonly int VecWorldSpaceCameraPos = Shader.PropertyToID("_VecWorldSpaceCameraPos");
             public static readonly int SelectionCenter = Shader.PropertyToID("_SelectionCenter");
@@ -693,7 +694,7 @@ namespace GaussianSplatting.Runtime
             cmd.EndSample(s_ProfSort);
         }
 
-        internal void CalcTileViewData(CommandBuffer cmb, Camera cam)
+        internal void CalcTileViewData(CommandBuffer cmb, Camera cam, float scale = 1.0f)
         {
             Debug.Assert(m_SplatCount <= 0xFFFFFFu); // We need to pack 8-bit tile offset upon 24-bit splat ID
 
@@ -706,7 +707,8 @@ namespace GaussianSplatting.Runtime
             Matrix4x4 matProj = GL.GetGPUProjectionMatrix(cam.projectionMatrix, false);
             Matrix4x4 matO2W = tr.localToWorldMatrix;
             Matrix4x4 matW2O = tr.worldToLocalMatrix;
-            int screenW = cam.pixelWidth, screenH = cam.pixelHeight;
+            int screenW = (int)Math.Ceiling(cam.pixelWidth * scale);
+            int screenH = (int)Math.Ceiling(cam.pixelHeight * scale);
             int tileCountW = (screenW + kSplatTileSize - 1) / kSplatTileSize;
             int tileCountH = (screenH + kSplatTileSize - 1) / kSplatTileSize;
             Vector4 screenPar = new(screenW, screenH, 0, 0);
@@ -744,6 +746,7 @@ namespace GaussianSplatting.Runtime
             cmb.SetComputeMatrixParam(m_CSSplatUtilities, Props.MatrixWorldToObject, matW2O);
 
             cmb.SetComputeVectorParam(m_CSSplatUtilities, Props.VecScreenParams, screenPar);
+            cmb.SetComputeIntParams(m_CSSplatUtilities, Props.IScreenWH, new int[2] { screenW, screenH });
             cmb.SetComputeIntParams(m_CSSplatUtilities, Props.VecTileParams, new int[2] { tileCountW, tileCountH });
             cmb.SetComputeVectorParam(m_CSSplatUtilities, Props.VecWorldSpaceCameraPos, camPos);
             cmb.SetComputeFloatParam(m_CSSplatUtilities, Props.SplatScale, m_SplatScale);
@@ -794,12 +797,13 @@ namespace GaussianSplatting.Runtime
             cmd.EndSample(s_ProfSort);
         }
 
-        internal void CalcTileRanges(CommandBuffer cmd, Camera cam)
+        internal void CalcTileRanges(CommandBuffer cmd, Camera cam, float scale = 1.0f)
         {
             if (cam.cameraType == CameraType.Preview)
                 return;
 
-            int screenW = cam.pixelWidth, screenH = cam.pixelHeight;
+            int screenW = (int)Math.Ceiling(cam.pixelWidth * scale);
+            int screenH = (int)Math.Ceiling(cam.pixelHeight * scale);
             int tileCountW = (screenW + kSplatTileSize - 1) / kSplatTileSize;
             int tileCountH = (screenH + kSplatTileSize - 1) / kSplatTileSize;
             int tileCount = tileCountW * tileCountH;
@@ -812,12 +816,13 @@ namespace GaussianSplatting.Runtime
             cmd.DispatchCompute(m_CSSplatUtilities, (int)KernelIndices.CalcTileRanges, m_GpuTileSplatIndirect, 0);
         }
 
-        internal void RenderTiles(CommandBuffer cmd, Camera cam, RTHandle target)
+        internal void RenderTiles(CommandBuffer cmd, Camera cam, RTHandle target, float scale = 1.0f)
         {
             if (cam.cameraType == CameraType.Preview)
                 return;
 
-            int screenW = cam.pixelWidth, screenH = cam.pixelHeight;
+            int screenW = (int)Math.Ceiling(cam.pixelWidth * scale);
+            int screenH = (int)Math.Ceiling(cam.pixelHeight * scale);
             int tileCountW = (screenW + kSplatTileSize - 1) / kSplatTileSize;
             int tileCountH = (screenH + kSplatTileSize - 1) / kSplatTileSize;
 

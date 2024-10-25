@@ -56,6 +56,7 @@ float4 _VecScreenParams;
 float4 _VecWorldSpaceCameraPos;
 int _SelectionMode;
 int2 _VecTileParams;
+int2 _IScreenWH;
 cbuffer cbTileSplatCount : register(b0)
 {
     uint e_tileSplatCount;
@@ -533,7 +534,8 @@ void CSRenderTile (uint3 threadID : SV_DispatchThreadID, uint3 groupID : SV_Grou
     
     color.a = 1.0 - color.a;
     
-    _RenderTarget[threadID.xy] = color;
+    if (all(threadID.xy < _IScreenWH))
+        _RenderTarget[threadID.xy] = color;
 }
 
 RWByteAddressBuffer _DstBuffer;
