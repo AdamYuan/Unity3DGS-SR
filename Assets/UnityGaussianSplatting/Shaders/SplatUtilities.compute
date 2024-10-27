@@ -46,6 +46,7 @@
 // Must be included after kernel definitions
 #include "GPUSorting/OneSweep.hlsl"
 #include "GaussianSplatting.hlsl"
+#include "SuperSample/FSR/FSR.hlsl"
 
 float4x4 _MatrixObjectToWorld;
 float4x4 _MatrixWorldToObject;

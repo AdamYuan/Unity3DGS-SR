@@ -696,6 +696,19 @@ namespace GaussianSplatting.Runtime
             m_Sorter.Dispatch(cmd, m_SorterArgs);
             cmd.EndSample(s_ProfSort);
         }
+        
+        void CalcCamTileInfo(Camera cam, float scale, out int o_screenW, out int o_screenH, out int o_tileCountW, out int o_tileCountH, out int o_tileCount) {
+            int screenW = (int)Math.Ceiling(cam.pixelWidth * scale);
+            int screenH = (int)Math.Ceiling(cam.pixelHeight * scale);
+            int tileCountW = (screenW + kSplatTileSize - 1) / kSplatTileSize;
+            int tileCountH = (screenH + kSplatTileSize - 1) / kSplatTileSize;
+            
+            o_screenW = screenW;
+            o_screenH = screenH;
+            o_tileCountW = tileCountW;
+            o_tileCountH = tileCountH;
+            o_tileCount = tileCountW * tileCountH;
+        }
 
         internal void CalcTileViewData(CommandBuffer cmb, Camera cam, float scale = 1.0f)
         {
@@ -710,10 +723,7 @@ namespace GaussianSplatting.Runtime
             Matrix4x4 matProj = GL.GetGPUProjectionMatrix(cam.projectionMatrix, false);
             Matrix4x4 matO2W = tr.localToWorldMatrix;
             Matrix4x4 matW2O = tr.worldToLocalMatrix;
-            int screenW = (int)Math.Ceiling(cam.pixelWidth * scale);
-            int screenH = (int)Math.Ceiling(cam.pixelHeight * scale);
-            int tileCountW = (screenW + kSplatTileSize - 1) / kSplatTileSize;
-            int tileCountH = (screenH + kSplatTileSize - 1) / kSplatTileSize;
+            CalcCamTileInfo(cam, scale, out int screenW, out int screenH, out int tileCountW, out int tileCountH, out _);
             Vector4 screenPar = new(screenW, screenH, 0, scale);
             Vector4 camPos = cam.transform.position;
 
@@ -805,11 +815,7 @@ namespace GaussianSplatting.Runtime
             if (cam.cameraType == CameraType.Preview)
                 return;
 
-            int screenW = (int)Math.Ceiling(cam.pixelWidth * scale);
-            int screenH = (int)Math.Ceiling(cam.pixelHeight * scale);
-            int tileCountW = (screenW + kSplatTileSize - 1) / kSplatTileSize;
-            int tileCountH = (screenH + kSplatTileSize - 1) / kSplatTileSize;
-            int tileCount = tileCountW * tileCountH;
+            CalcCamTileInfo(cam, scale, out _, out _, out _, out _, out int tileCount);
 
             cmd.SetBufferData(m_GpuTileRanges, m_GpuTileRangesClearData, 0, 0, tileCount);
 
@@ -824,10 +830,7 @@ namespace GaussianSplatting.Runtime
             if (cam.cameraType == CameraType.Preview)
                 return;
 
-            int screenW = (int)Math.Ceiling(cam.pixelWidth * scale);
-            int screenH = (int)Math.Ceiling(cam.pixelHeight * scale);
-            int tileCountW = (screenW + kSplatTileSize - 1) / kSplatTileSize;
-            int tileCountH = (screenH + kSplatTileSize - 1) / kSplatTileSize;
+            CalcCamTileInfo(cam, scale, out int screenW, out int screenH, out int tileCountW, out int tileCountH, out _);
 
             cmd.SetComputeVectorParam(m_CSSplatUtilities, Props.VecScreenParams, new Vector4(screenW, screenH, 0, 0));
             // cmd.SetComputeIntParams(m_CSSplatUtilities, Props.VecTileParams, new int[2] { tileCountW, tileCountH });
@@ -837,7 +840,7 @@ namespace GaussianSplatting.Runtime
             cmd.SetComputeTextureParam(m_CSSplatUtilities, (int)KernelIndices.RenderTile, Props.RenderTarget, target);
             cmd.DispatchCompute(m_CSSplatUtilities, (int)KernelIndices.RenderTile, tileCountW, tileCountH, 1);
         }
-
+        
         public void Update()
         {
             var curHash = m_Asset ? m_Asset.dataHash : new Hash128();

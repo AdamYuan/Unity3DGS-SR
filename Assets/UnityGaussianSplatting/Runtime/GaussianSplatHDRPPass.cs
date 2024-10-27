@@ -40,7 +40,7 @@ namespace GaussianSplatting.Runtime
                 return;
 
             Material matComposite;
-
+            
             if (m_RenderMode == GaussianSplatRenderMode.Quad)
             {   
                 CoreUtils.SetRenderTarget(ctx.cmd, m_RenderTarget, ctx.cameraDepthBuffer, ClearFlag.Color,
