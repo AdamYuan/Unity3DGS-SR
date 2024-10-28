@@ -12,7 +12,7 @@ namespace GaussianSplatting.Runtime
     // Code below "seems to work" but I'm just fumbling along, without understanding any of it.
     class GaussianSplatHDRPPass : CustomPass
     {
-        RTHandle m_RenderTarget, m_SSTmpRenderTarget;
+        RTHandle m_RenderTarget;
 
         public GaussianSplatRenderMode m_RenderMode;
         [Range(0.5f, 1.0f)]
@@ -30,12 +30,6 @@ namespace GaussianSplatting.Runtime
                 depthBufferBits: DepthBits.None, msaaSamples: MSAASamples.None,
                 filterMode: FilterMode.Point, wrapMode: TextureWrapMode.Clamp,
                 enableRandomWrite: true, name: "_GaussianSplatRT");
-
-            m_SSTmpRenderTarget = RTHandles.Alloc(Vector2.one,
-                colorFormat: GraphicsFormat.R16G16B16A16_SFloat, useDynamicScale: true,
-                depthBufferBits: DepthBits.None, msaaSamples: MSAASamples.None,
-                filterMode: FilterMode.Point, wrapMode: TextureWrapMode.Clamp,
-                enableRandomWrite: true, name: "_SuperSampleTmpRT");
         }
 
         protected override void Execute(CustomPassContext ctx)
@@ -76,7 +70,6 @@ namespace GaussianSplatting.Runtime
         protected override void Cleanup()
         {
             m_RenderTarget.Release();
-            m_SSTmpRenderTarget.Release();
         }
     }
 }

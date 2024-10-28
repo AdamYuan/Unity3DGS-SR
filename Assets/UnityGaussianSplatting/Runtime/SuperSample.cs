@@ -69,11 +69,6 @@ namespace GaussianSplatting.Runtime
 
         public void DispatchFSR(CommandBuffer cmd, Args args)
         {
-            if (args.resources.easuParamBuffer == null || args.resources.rcasParamBuffer == null || args.target == null) {
-                Debug.Log("Why?");
-                return;
-            }
-
             int groupX = (args.dstSize.x + 7) / 8;
             int groupY = (args.dstSize.y + 7) / 8;
 
@@ -89,6 +84,7 @@ namespace GaussianSplatting.Runtime
 
             // EASU Init
             cmd.SetComputeBufferParam(m_CS, m_kernelFsrEasuInit, "_EASUParameters", args.resources.easuParamBuffer);
+            cmd.SetComputeTextureParam(m_CS, m_kernelFsrEasuInit, "_EASUInputTexture", args.target);
             cmd.DispatchCompute(m_CS, m_kernelFsrEasuInit, 1, 1, 1);
             
             // EASU Main

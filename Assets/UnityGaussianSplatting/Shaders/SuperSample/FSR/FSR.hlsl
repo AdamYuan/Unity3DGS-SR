@@ -83,9 +83,12 @@ void KFsrEasuInitialize()
     AU4 con1 = (AU4)0;
     AU4 con2 = (AU4)0;
     AU4 con3 = (AU4)0;
+    
+    float2 inputImageSize;
+    _EASUInputTexture.GetDimensions(inputImageSize.x, inputImageSize.y);
     FsrEasuCon(con0,con1,con2,con3,
         _EASUViewportSize.x,  _EASUViewportSize.y,
-        _EASUInputImageSize.x,_EASUInputImageSize.y,
+        inputImageSize.x,     inputImageSize.y,
         _EASUOutputSize.x,    _EASUOutputSize.y);
 
     _EASUParameters[0] = con0;
