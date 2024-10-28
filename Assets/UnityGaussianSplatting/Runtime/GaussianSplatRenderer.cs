@@ -199,11 +199,11 @@ namespace GaussianSplatting.Runtime
             return matComposite;
         }
 
-        public void SuperSampleFSR(Camera cam, CommandBuffer cmb, float scale, RTHandle target, RTHandle tmp = null) {
+        public void SuperSample(Camera cam, CommandBuffer cmb, SuperSampleMethod method, float scale, RTHandle target, RTHandle tmp = null) {
             if (m_ActiveSplats.Count == 0)
                 return;
             
-            m_ActiveSplats.First().Item1.SuperSampleFSR(cmb, cam, scale, target, tmp);
+            m_ActiveSplats.First().Item1.CalcSuperSample(cmb, cam, method, scale, target, tmp);
         }
 
         // ReSharper disable once MemberCanBePrivate.Global - used by HDRP/URP features that are not always compiled
@@ -857,7 +857,7 @@ namespace GaussianSplatting.Runtime
             cmd.DispatchCompute(m_CSSplatUtilities, (int)KernelIndices.RenderTile, tileCountW, tileCountH, 1);
         }
         
-        internal void SuperSampleFSR(CommandBuffer cmd, Camera cam, float scale, RTHandle target, RTHandle tmp = null) {
+        internal void CalcSuperSample(CommandBuffer cmd, Camera cam, SuperSampleMethod method, float scale, RTHandle target, RTHandle tmp = null) {
             if (cam.cameraType == CameraType.Preview)
                 return;
 
@@ -866,8 +866,9 @@ namespace GaussianSplatting.Runtime
             m_SuperSamplerArgs.dstSize = new(cam.pixelWidth, cam.pixelHeight);
             m_SuperSamplerArgs.target = target;
             m_SuperSamplerArgs.tmp = tmp;
+            m_SuperSamplerArgs.method = method;
             
-            m_SuperSampler.DispatchFSR(cmd, m_SuperSamplerArgs);
+            m_SuperSampler.Dispatch(cmd, m_SuperSamplerArgs);
         }
         
         public void Update()

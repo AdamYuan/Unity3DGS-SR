@@ -3,6 +3,10 @@ using UnityEngine.Rendering;
 
 namespace GaussianSplatting.Runtime
 {
+    public enum SuperSampleMethod {
+        None, Upscale, FSR
+    };
+    
     public class SuperSample
     {
         readonly ComputeShader m_CS;
@@ -10,7 +14,7 @@ namespace GaussianSplatting.Runtime
         protected int m_kernelFsrEasuMain = -1;
         protected int m_kernelFsrRcasInit = -1;
         protected int m_kernelFsrRcasMain = -1;
-        protected int m_fsrTmpID = Shader.PropertyToID("_FsrTmpTexture");
+        protected int m_tmpTargetID = Shader.PropertyToID("_ssTmpTargetTexture");
 
         public struct SupportResources
         {
@@ -40,9 +44,10 @@ namespace GaussianSplatting.Runtime
 
         public struct Args
         {
+            public SuperSampleMethod method;
             public Vector2Int srcSize, dstSize;
             public RTHandle target, tmp;
-            // target and tmp's sizes should equals to dstSize, tmp can be null
+            // target and tmp's sizes should equals to or larger than dstSize, tmp can be null
             public SupportResources resources;
         }
 
@@ -67,7 +72,7 @@ namespace GaussianSplatting.Runtime
             return desc;
         }
 
-        public void DispatchFSR(CommandBuffer cmd, Args args)
+        private void DispatchFSR(CommandBuffer cmd, Args args)
         {
             int groupX = (args.dstSize.x + 7) / 8;
             int groupY = (args.dstSize.y + 7) / 8;
@@ -80,7 +85,7 @@ namespace GaussianSplatting.Runtime
 
             // Alloc TemporaryRT
             if (args.tmp == null)
-                cmd.GetTemporaryRT(m_fsrTmpID, GetUAVCompatibleDescriptor(args.target, args.dstSize.x, args.dstSize.y));
+                cmd.GetTemporaryRT(m_tmpTargetID, GetUAVCompatibleDescriptor(args.target, args.dstSize.x, args.dstSize.y));
 
             // EASU Init
             cmd.SetComputeBufferParam(m_CS, m_kernelFsrEasuInit, "_EASUParameters", args.resources.easuParamBuffer);
@@ -91,7 +96,7 @@ namespace GaussianSplatting.Runtime
             cmd.SetComputeBufferParam(m_CS, m_kernelFsrEasuMain, "_EASUParameters", args.resources.easuParamBuffer);
             cmd.SetComputeTextureParam(m_CS, m_kernelFsrEasuMain, "_EASUInputTexture", args.target);
             if (args.tmp == null)
-                cmd.SetComputeTextureParam(m_CS, m_kernelFsrEasuMain, "_EASUOutputTexture", m_fsrTmpID);
+                cmd.SetComputeTextureParam(m_CS, m_kernelFsrEasuMain, "_EASUOutputTexture", m_tmpTargetID);
             else
                 cmd.SetComputeTextureParam(m_CS, m_kernelFsrEasuMain, "_EASUOutputTexture", args.tmp);
             cmd.DispatchCompute(m_CS, m_kernelFsrEasuMain, groupX, groupY, 1);
@@ -103,7 +108,7 @@ namespace GaussianSplatting.Runtime
             // RCAS Main
             cmd.SetComputeBufferParam(m_CS, m_kernelFsrRcasMain, "_RCASParameters", args.resources.rcasParamBuffer);
             if (args.tmp == null)
-                cmd.SetComputeTextureParam(m_CS, m_kernelFsrRcasMain, "_RCASInputTexture", m_fsrTmpID);
+                cmd.SetComputeTextureParam(m_CS, m_kernelFsrRcasMain, "_RCASInputTexture", m_tmpTargetID);
             else
                 cmd.SetComputeTextureParam(m_CS, m_kernelFsrRcasMain, "_RCASInputTexture", args.tmp);
             cmd.SetComputeTextureParam(m_CS, m_kernelFsrRcasMain, "_RCASOutputTexture", args.target);
@@ -111,7 +116,35 @@ namespace GaussianSplatting.Runtime
             
             // Free TemporaryRT
             if (args.tmp == null)
-                cmd.ReleaseTemporaryRT(m_fsrTmpID);
+                cmd.ReleaseTemporaryRT(m_tmpTargetID);
+        }
+
+        private void DispatchUpscale(CommandBuffer cmd, Args args)
+        {
+            RenderTargetIdentifier tmpTarget = args.tmp;
+            // Alloc TemporaryRT
+            if (args.tmp == null) {
+                cmd.GetTemporaryRT(m_tmpTargetID, GetUAVCompatibleDescriptor(args.target, args.dstSize.x, args.dstSize.y));
+                tmpTarget = m_tmpTargetID;
+            }
+            
+            cmd.Blit(args.target, tmpTarget, 
+                     new Vector2(args.srcSize.x / (float)args.dstSize.x, args.srcSize.y / (float)args.dstSize.y), 
+                     new Vector2(0, 0));
+            
+            cmd.Blit(tmpTarget, args.target);
+
+            // Free TemporaryRT
+            if (args.tmp == null)
+                cmd.ReleaseTemporaryRT(m_tmpTargetID);
+        }
+
+        public void Dispatch(CommandBuffer cmd, Args args)
+        {
+            if (args.method == SuperSampleMethod.Upscale)
+                DispatchUpscale(cmd, args);
+            else if (args.method == SuperSampleMethod.FSR)
+                DispatchFSR(cmd, args);
         }
     }
 }
