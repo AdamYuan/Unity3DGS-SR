@@ -2,6 +2,7 @@
 
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using Unity.Collections;
 using Unity.Collections.LowLevel.Unsafe;
 using Unity.Mathematics;
@@ -198,6 +199,13 @@ namespace GaussianSplatting.Runtime
             return matComposite;
         }
 
+        public void SuperSampleFSR(Camera cam, CommandBuffer cmb, float scale, RTHandle target, RTHandle tmp = null) {
+            if (m_ActiveSplats.Count == 0)
+                return;
+            
+            m_ActiveSplats.First().Item1.SuperSampleFSR(cmb, cam, scale, target, tmp);
+        }
+
         // ReSharper disable once MemberCanBePrivate.Global - used by HDRP/URP features that are not always compiled
         // ReSharper disable once UnusedMethodReturnValue.Global - used by HDRP/URP features that are not always compiled
         public CommandBuffer InitialClearCmdBuffer(Camera cam)
@@ -326,6 +334,9 @@ namespace GaussianSplatting.Runtime
         GpuSorting m_Sorter;
         GpuSorting.Args m_SorterArgs;
         GpuSorting.IndirectArgs m_TileSorterArgs;
+        
+        SuperSample m_SuperSampler;
+        SuperSample.Args m_SuperSamplerArgs;
 
         internal Material m_MatSplats;
         internal Material m_MatComposite;
@@ -496,6 +507,8 @@ namespace GaussianSplatting.Runtime
             m_GpuTileRanges = new GraphicsBuffer(GraphicsBuffer.Target.Structured, kMaxTilesOnScreen, 2 * sizeof(uint)) { name = "TileRanges" }; ;
             m_GpuTileRangesClearData = new uint2[kMaxTilesOnScreen];
 
+            m_SuperSamplerArgs.resources = SuperSample.SupportResources.Load();
+
             InitSortBuffers(splatCount);
         }
 
@@ -542,6 +555,8 @@ namespace GaussianSplatting.Runtime
             m_MatDebugBoxes = new Material(m_ShaderDebugBoxes) { name = "GaussianDebugBoxes" };
 
             m_Sorter = new GpuSorting(m_CSSplatUtilities);
+            m_SuperSampler = new SuperSample(m_CSSplatUtilities);
+            m_SuperSamplerArgs = new();
             GaussianSplatRenderSystem.instance.RegisterSplat(this);
 
             CreateResourcesForAsset();
@@ -622,6 +637,7 @@ namespace GaussianSplatting.Runtime
             DisposeBuffer(ref m_GpuEditCutouts);
 
             m_SorterArgs.resources.Dispose();
+            m_SuperSamplerArgs.resources.Dispose();
             m_TileSorterArgs.resources.Dispose();
 
             m_SplatCount = 0;
@@ -839,6 +855,19 @@ namespace GaussianSplatting.Runtime
             cmd.SetComputeBufferParam(m_CSSplatUtilities, (int)KernelIndices.RenderTile, Props.SplatTileViewDataRO, m_GpuView);
             cmd.SetComputeTextureParam(m_CSSplatUtilities, (int)KernelIndices.RenderTile, Props.RenderTarget, target);
             cmd.DispatchCompute(m_CSSplatUtilities, (int)KernelIndices.RenderTile, tileCountW, tileCountH, 1);
+        }
+        
+        internal void SuperSampleFSR(CommandBuffer cmd, Camera cam, float scale, RTHandle target, RTHandle tmp = null) {
+            if (cam.cameraType == CameraType.Preview)
+                return;
+
+            CalcCamTileInfo(cam, scale, out int screenW, out int screenH, out _, out _, out _);
+            m_SuperSamplerArgs.srcSize = new(screenW, screenH);
+            m_SuperSamplerArgs.dstSize = new(cam.pixelWidth, cam.pixelHeight);
+            m_SuperSamplerArgs.target = target;
+            m_SuperSamplerArgs.tmp = tmp;
+            
+            m_SuperSampler.DispatchFSR(cmd, m_SuperSamplerArgs);
         }
         
         public void Update()

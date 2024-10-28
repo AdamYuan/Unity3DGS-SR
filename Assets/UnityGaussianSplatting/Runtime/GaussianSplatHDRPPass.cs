@@ -12,11 +12,12 @@ namespace GaussianSplatting.Runtime
     // Code below "seems to work" but I'm just fumbling along, without understanding any of it.
     class GaussianSplatHDRPPass : CustomPass
     {
-        RTHandle m_RenderTarget;
+        RTHandle m_RenderTarget, m_SSTmpRenderTarget;
 
         public GaussianSplatRenderMode m_RenderMode;
         [Range(0.5f, 1.0f)]
         public float m_Scale = 1.0f;
+        public bool m_UseFSR = false;
 
         // It can be used to configure render targets and their clear state. Also to create temporary render target textures.
         // When empty this render pass will render to the active camera render target.
@@ -29,6 +30,12 @@ namespace GaussianSplatting.Runtime
                 depthBufferBits: DepthBits.None, msaaSamples: MSAASamples.None,
                 filterMode: FilterMode.Point, wrapMode: TextureWrapMode.Clamp,
                 enableRandomWrite: true, name: "_GaussianSplatRT");
+
+            m_SSTmpRenderTarget = RTHandles.Alloc(Vector2.one,
+                colorFormat: GraphicsFormat.R16G16B16A16_SFloat, useDynamicScale: true,
+                depthBufferBits: DepthBits.None, msaaSamples: MSAASamples.None,
+                filterMode: FilterMode.Point, wrapMode: TextureWrapMode.Clamp,
+                enableRandomWrite: true, name: "_SuperSampleTmpRT");
         }
 
         protected override void Execute(CustomPassContext ctx)
@@ -54,6 +61,9 @@ namespace GaussianSplatting.Runtime
                 matComposite = GaussianSplatRenderSystem.instance.TileSortAndRenderSplats(ctx.hdCamera.camera, ctx.cmd, m_RenderTarget, m_Scale);
             }
 
+            if (m_UseFSR)
+                GaussianSplatRenderSystem.instance.SuperSampleFSR(ctx.hdCamera.camera, ctx.cmd, m_Scale, m_RenderTarget, null);
+
             ctx.cmd.SetGlobalTexture(m_RenderTarget.name, m_RenderTarget.nameID);
 
             // compose
@@ -66,6 +76,7 @@ namespace GaussianSplatting.Runtime
         protected override void Cleanup()
         {
             m_RenderTarget.Release();
+            m_SSTmpRenderTarget.Release();
         }
     }
 }

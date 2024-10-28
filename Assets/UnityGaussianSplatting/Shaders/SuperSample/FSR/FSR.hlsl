@@ -8,9 +8,7 @@
 // #pragma multi_compile _ ENABLE_ALPHA _AMD_FSR_HALF _AMD_FSR_NEEDS_CONVERT_TO_SRGB
 // #define ENABLE_ALPHA
 // #define _AMD_FSR_HALF
-#pragma only_renderers d3d11 playstation xboxone xboxseries vulkan metal switch
 
-#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl"
 #include "amd_fsr.hlsl"
 
 // 4 elements:
@@ -30,13 +28,13 @@ Texture2D<float4> _EASUInputTexture;
 RWTexture2D<float4> _EASUOutputTexture;
 
 #ifdef _AMD_FSR_HALF
-AH4 FsrEasuRH(AF2 p){ return AH4(AMD_FSR_TO_SRGB(_EASUInputTexture.SampleLevel(s_linear_clamp_sampler, p, 0).r)); }
-AH4 FsrEasuGH(AF2 p){ return AH4(AMD_FSR_TO_SRGB(_EASUInputTexture.SampleLevel(s_linear_clamp_sampler, p, 0).g)); }
-AH4 FsrEasuBH(AF2 p){ return AH4(AMD_FSR_TO_SRGB(_EASUInputTexture.SampleLevel(s_linear_clamp_sampler, p, 0).b)); }
+AH4 FsrEasuRH(AF2 p){ return AH4(AMD_FSR_TO_SRGB(_EASUInputTexture.GatherRed(s_linear_clamp_sampler, p))); }
+AH4 FsrEasuGH(AF2 p){ return AH4(AMD_FSR_TO_SRGB(_EASUInputTexture.GatherGreen(s_linear_clamp_sampler, p))); }
+AH4 FsrEasuBH(AF2 p){ return AH4(AMD_FSR_TO_SRGB(_EASUInputTexture.GatherBlue(s_linear_clamp_sampler, p))); }
 #else
-AF4 FsrEasuRF(AF2 p){ return AMD_FSR_TO_SRGB(_EASUInputTexture.SampleLevel(s_linear_clamp_sampler, p, 0).r); }
-AF4 FsrEasuGF(AF2 p){ return AMD_FSR_TO_SRGB(_EASUInputTexture.SampleLevel(s_linear_clamp_sampler, p, 0).g); }
-AF4 FsrEasuBF(AF2 p){ return AMD_FSR_TO_SRGB(_EASUInputTexture.SampleLevel(s_linear_clamp_sampler, p, 0).b); }
+AF4 FsrEasuRF(AF2 p){ return AMD_FSR_TO_SRGB(_EASUInputTexture.GatherRed(s_linear_clamp_sampler, p)); }
+AF4 FsrEasuGF(AF2 p){ return AMD_FSR_TO_SRGB(_EASUInputTexture.GatherGreen(s_linear_clamp_sampler, p)); }
+AF4 FsrEasuBF(AF2 p){ return AMD_FSR_TO_SRGB(_EASUInputTexture.GatherBlue(s_linear_clamp_sampler, p)); }
 #endif
 
 [numthreads(64, 1, 1)]
@@ -126,7 +124,7 @@ void KFsrRcasMain(uint3 LocalThreadId : SV_GroupThreadID, uint3 WorkGroupId : SV
     // Do remapping of local xy in workgroup for a more PS-like swizzle pattern.
     AU2 gxy = ARmp8x8(LocalThreadId.x) + AU2(WorkGroupId.x << 3u, WorkGroupId.y << 3u);
 #ifdef ENABLE_ALPHA
-    AREAL alpha = _RCASInputTexture.Load(int3(gxy.xy)).a;
+    AREAL alpha = _RCASInputTexture.Load(int3(gxy.xy, 0)).a;
 #else
     AREAL alpha = 1.0;
 #endif
