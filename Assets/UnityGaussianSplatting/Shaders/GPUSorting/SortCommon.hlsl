@@ -37,20 +37,20 @@
 #define RADIX_PASSES        4U      //(Key width) / RADIX_LOG
 
 #if defined(SORT_INDIRECT)
-    cbuffer cbGpuSorting : register(b0)
+    cbuffer cbGpuSorting
     {
         uint e_radixShift;
     };
-    cbuffer cbGpuSortingNumKeys : register(b1)
+    cbuffer cbGpuSortingNumKeys
     {
         uint e_numKeys;
     };
-    cbuffer cbGpuSortingNumThreadBlocks : register(b2)
+    cbuffer cbGpuSortingNumThreadBlocks
     {
         uint e_threadBlocks;
     };
 #else
-    cbuffer cbGpuSorting : register(b0)
+    cbuffer cbGpuSorting
     {
         uint e_radixShift;
         uint e_numKeys;

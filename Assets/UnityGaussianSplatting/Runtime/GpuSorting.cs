@@ -43,7 +43,6 @@ namespace GaussianSplatting.Runtime
             public GraphicsBuffer tempPassHistBuffer;
             public GraphicsBuffer tempIndexBuffer;
             public GraphicsBuffer histIndirectBuffer, sortIndirectBuffer, copyIndirectBuffer;
-            // public GraphicsBuffer numHistThreadBlocksBuffer, numSortThreadBlocksBuffer;
 
             public static SupportResources Load(uint count)
             {
@@ -61,12 +60,11 @@ namespace GaussianSplatting.Runtime
 
             public static SupportResources LoadIndirect(uint max_count)
             {
+                var target = GraphicsBuffer.Target.Structured | GraphicsBuffer.Target.IndirectArguments | GraphicsBuffer.Target.Constant;
                 var resources = Load(max_count);
-                resources.histIndirectBuffer = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 3, sizeof(uint));
-                resources.sortIndirectBuffer = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 3, sizeof(uint));
-                resources.copyIndirectBuffer = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 3, sizeof(uint));
-                // resources.numHistThreadBlocksBuffer = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 1, sizeof(uint));
-                // resources.numSortThreadBlocksBuffer = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 1, sizeof(uint));
+                resources.histIndirectBuffer = new GraphicsBuffer(target, 3, sizeof(uint));
+                resources.sortIndirectBuffer = new GraphicsBuffer(target, 3, sizeof(uint));
+                resources.copyIndirectBuffer = new GraphicsBuffer(target, 3, sizeof(uint));
                 return resources;
             }
 
@@ -80,8 +78,6 @@ namespace GaussianSplatting.Runtime
                 histIndirectBuffer?.Dispose();
                 sortIndirectBuffer?.Dispose();
                 copyIndirectBuffer?.Dispose();
-                // numHistThreadBlocksBuffer?.Dispose();
-                // numSortThreadBlocksBuffer?.Dispose();
 
                 tempKeyBuffer = null;
                 tempPayloadBuffer = null;
@@ -91,8 +87,6 @@ namespace GaussianSplatting.Runtime
                 histIndirectBuffer = null;
                 sortIndirectBuffer = null;
                 copyIndirectBuffer = null;
-                // numHistThreadBlocksBuffer = null;
-                // numSortThreadBlocksBuffer = null;
             }
         }
 
@@ -294,8 +288,6 @@ namespace GaussianSplatting.Runtime
             cmd.SetComputeBufferParam(m_CS, m_kernelInitIndirect, "b_histIndirect", args.resources.histIndirectBuffer);
             cmd.SetComputeBufferParam(m_CS, m_kernelInitIndirect, "b_sortIndirect", args.resources.sortIndirectBuffer);
             cmd.SetComputeBufferParam(m_CS, m_kernelInitIndirect, "b_copyIndirect", args.resources.copyIndirectBuffer);
-            // cmd.SetComputeBufferParam(m_CS, m_kernelInitIndirect, "b_numHistThreadBlocks", args.resources.numHistThreadBlocksBuffer);
-            // cmd.SetComputeBufferParam(m_CS, m_kernelInitIndirect, "b_numSortThreadBlocks", args.resources.numSortThreadBlocksBuffer);
             cmd.DispatchCompute(m_CS, m_kernelInitIndirect, 1, 1, 1);
         }
 
