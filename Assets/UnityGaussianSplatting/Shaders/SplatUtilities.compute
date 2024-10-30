@@ -219,6 +219,118 @@ bool IsSplatCut(float3 pos)
     return finalCut;
 }
 
+#define LOG_MAX_SPLAT_SPLIT_COUNT 16
+#define MAX_SPLAT_SPLIT_COUNT (1 << LOG_MAX_SPLAT_SPLIT_COUNT)
+#define MAX_SPLAT_SPLIT_LEVEL 4
+#define MAX_SPLAT_INSTANCE_COUNT (MAX_SPLAT_SPLIT_COUNT * ((1 << MAX_SPLAT_SPLIT_LEVEL) - 1)) // For splat instance data buffer
+
+struct SplatInstanceData {
+    float3 pos;
+    uint rootSplatID;
+    uint2 rotFP16x4;
+    uint2 scaleOpacityFP16x4;
+};
+
+SplatInstanceData GetSplatInstanceDataFromSplatData(uint splatID, in const SplatData splat) {
+    SplatInstanceData ret;
+    ret.pos = splat.pos;
+    ret.rootSplatID = splatID;
+    ret.rotFP16x4 = uint2(
+        f32tof16(splat.rot.x) | f32tof16(splat.rot.y) << 16, 
+        f32tof16(splat.rot.z) | f32tof16(splat.rot.w) << 16
+    );
+    ret.scaleOpacityFP16x4 = uint2(
+        f32tof16(splat.scale.x) | f32tof16(splat.scale.y) << 16, 
+        f32tof16(splat.scale.z) | f32tof16(float(splat.opacity)) << 16
+    );
+    return ret;
+}
+
+RWStructuredBuffer<uint> _SplatSplitIDStack;
+RWStructuredBuffer<uint> _SplatSplitCount;
+
+uint AllocSplatSplitID() {
+    uint idx;
+    InterlockedAdd(_SplatSplitCount[0], 1, idx);
+    if (idx >= MAX_SPLAT_SPLIT_COUNT)
+        return -1;
+    return _SplatSplitIDStack[idx];
+}
+
+void FreeSplatSplitID(uint splatSplitID) {
+    // Must ensure _SplatSplitCount[0] <= MAX_SPLAT_SPLIT_COUNT
+    uint idx;
+    InterlockedAdd(_SplatSplitCount[0], -1, idx);
+    --idx;
+    // (int)idx >= 0 is guarenteed if there's no more free's than allocates
+    _SplatSplitIDStack[idx] = splatSplitID;
+}
+
+RWStructuredBuffer<SplatInstanceData> _SplatInstances; // MAX_SPLAT_INSTANCE_COUNT
+
+RWStructuredBuffer<uint> _SplatSplitLevels;
+
+StructuredBuffer<uint> _SplatInstanceSrcIDs;
+RWStructuredBuffer<uint> _SplatInstanceDstIDs;
+RWStructuredBuffer<uint> _SplatInstanceIDCount;
+
+#define TREE_CODE_ROOT 1
+#define TREE_CODE_PARENT(treeCode) ((treeCode) >> 1)
+#define TREE_CODE_LCHILD(treeCode) ((treeCode) << 1)
+#define TREE_CODE_RCHILD(treeCode) ((treeCode) << 1 | 1)
+
+uint GetTreeCodeLevel(uint treeCode) {
+    // ROOT:         1       MSB = 0
+    // LVL1:     10  11      MSB = 1
+    // LVL2: 100 101 110 111 MSB = 2
+    // LVL3: ...
+    return firstbithigh(treeCode) + 1u;
+}
+
+uint EncodeSplatInstanceID(uint splatSplitID, uint treeCode) {
+    return splatSplitID | ((treeCode - 1) << LOG_MAX_SPLAT_SPLIT_COUNT);
+}
+
+void DecodeSplatInstanceID(uint splatInstanceID, out uint o_splatSplitID, out uint o_treeCode) {
+    o_splatSplitID = splatInstanceID & (MAX_SPLAT_SPLIT_COUNT - 1);
+    o_treeCode = 1u + (splatInstanceID >> LOG_MAX_SPLAT_SPLIT_COUNT);
+}
+
+uint GetRootSplatInstanceID(uint splatSplitID) {
+    return EncodeSplatInstanceID(splatSplitID, TREE_CODE_ROOT);
+}
+
+/* void IsRootSplatInstanceID(uint splatInstanceID) {
+    return splatInstanceID < MAX_SPLAT_SPLIT_COUNT;
+} */
+
+void PushSplatInstanceID(uint splatInstanceID) {
+    uint idx;
+    InterlockedAdd(_SplatInstanceIDCount[0], 1, idx);
+    _SplatInstanceDstIDs[idx] = splatInstanceID;
+}
+
+// level \in [0, MAX_SPLAT_SPLIT_LEVEL], 0 means no split
+void UpdateSplatSplitLevel(uint splatID, in const SplatData splatData, uint level) {
+    uint prevLevel = _SplatSplitLevels[splatID];
+    
+    if (level == prevLevel)
+        return;
+    
+    if (prevLevel == 0 && level > 0) {
+        // Allocate
+        uint splatSplitID = AllocSplatSplitID();
+        if (splatSplitID == -1)
+            return;
+        
+        uint splatInstanceID = GetRootSplatInstanceID(splatSplitID);
+        _SplatInstances[splatInstanceID] = GetSplatInstanceDataFromSplatData(splatID, splatData);
+        PushSplatInstanceID(splatInstanceID);
+    }
+    
+    _SplatSplitLevels[splatID] = level;
+}
+
 [numthreads(GROUP_SIZE,1,1)]
 void CSCalcViewData (uint3 id : SV_DispatchThreadID)
 {
@@ -240,7 +352,7 @@ void CSCalcViewData (uint3 id : SV_DispatchThreadID)
     _SplatSortDistances[idx] = FloatToSortableUint(-centerViewPos.z);
 
     // deleted?
-    if (_SplatBitsValid)
+    /* if (_SplatBitsValid)
     {
         uint wordIdx = idx / 32;
         uint bitIdx = idx & 31;
@@ -255,7 +367,7 @@ void CSCalcViewData (uint3 id : SV_DispatchThreadID)
     if (IsSplatCut(splat.pos))
     {
         centerClipPos.w = 0;
-    }
+    } */
 
     view.pos = centerClipPos;
     bool behindCam = centerClipPos.w <= 0;
