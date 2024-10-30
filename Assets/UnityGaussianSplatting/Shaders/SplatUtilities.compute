@@ -8,6 +8,7 @@
 #define MAX_TILE_PER_SPLAT 0xFFFF // Pack 8 bits upon splat ID and 8 bits upon distance
 
 #pragma kernel CSCalcViewData
+#pragma kernel CSInitViewSplatIndirect
 #pragma kernel CSCalcTileViewData
 #pragma kernel CSInitTileSplatIndirect
 #pragma kernel CSReorderTileID
@@ -56,7 +57,7 @@ float4 _VecScreenParams;
 float4 _VecWorldSpaceCameraPos;
 int _SelectionMode;
 int2 _VecTileParams;
-cbuffer cbTileSplatCount : register(b0)
+cbuffer cbTileSplatCount
 {
     uint e_tileSplatCount;
 };
@@ -267,9 +268,6 @@ void FreeSplatSplitID(uint splatSplitID) {
 }
 
 RWStructuredBuffer<SplatInstanceData> _SplatInstances; // MAX_SPLAT_INSTANCE_COUNT
-
-RWStructuredBuffer<uint> _SplatSplitLevels;
-
 StructuredBuffer<uint> _SplatInstanceSrcIDs;
 RWStructuredBuffer<uint> _SplatInstanceDstIDs;
 RWStructuredBuffer<uint> _SplatInstanceIDCount;
@@ -310,6 +308,8 @@ void PushSplatInstanceID(uint splatInstanceID) {
     _SplatInstanceDstIDs[idx] = splatInstanceID;
 }
 
+RWBuffer<uint> _SplatSplitLevels;
+
 // level \in [0, MAX_SPLAT_SPLIT_LEVEL], 0 means no split
 void UpdateSplatSplitLevel(uint splatID, in const SplatData splatData, uint level) {
     uint prevLevel = _SplatSplitLevels[splatID];
@@ -331,6 +331,9 @@ void UpdateSplatSplitLevel(uint splatID, in const SplatData splatData, uint leve
     _SplatSplitLevels[splatID] = level;
 }
 
+RWStructuredBuffer<uint> _ViewSplatCount;
+RWStructuredBuffer<uint> _ViewSplatDrawIndirect;
+
 [numthreads(GROUP_SIZE,1,1)]
 void CSCalcViewData (uint3 id : SV_DispatchThreadID)
 {
@@ -346,10 +349,6 @@ void CSCalcViewData (uint3 id : SV_DispatchThreadID)
     float4 centerClipPos = mul(_MatrixVP, float4(centerWorldPos, 1));
     half opacityScale = _SplatOpacityScale;
     float splatScale = _SplatScale;
-
-    // for sort
-    _SplatSortKeys[idx] = idx;
-    _SplatSortDistances[idx] = FloatToSortableUint(-centerViewPos.z);
 
     // deleted?
     /* if (_SplatBitsValid)
@@ -370,35 +369,60 @@ void CSCalcViewData (uint3 id : SV_DispatchThreadID)
     } */
 
     view.pos = centerClipPos;
+
     bool behindCam = centerClipPos.w <= 0;
-    if (!behindCam)
-    {
-        float4 boxRot = splat.rot;
-        float3 boxSize = splat.scale;
+    if (behindCam)
+        return;
 
-        float3x3 splatRotScaleMat = CalcMatrixFromRotationScale(boxRot, boxSize);
+    centerClipPos /= centerClipPos.w;
 
-        float3 cov3d0, cov3d1;
-        CalcCovariance3D(splatRotScaleMat, cov3d0, cov3d1);
-        float splatScale2 = splatScale * splatScale;
-        cov3d0 *= splatScale2;
-        cov3d1 *= splatScale2;
-        float3 cov2d = CalcCovariance2D(splat.pos, cov3d0, cov3d1, _MatrixMV, _MatrixP, _VecScreenParams);
-        
-        DecomposeCovariance(cov2d, view.axis1, view.axis2);
-
-        float3 worldViewDir = _VecWorldSpaceCameraPos.xyz - centerWorldPos;
-        float3 objViewDir = mul((float3x3)_MatrixWorldToObject, worldViewDir);
-        objViewDir = normalize(objViewDir);
-
-        half4 col;
-        col.rgb = ShadeSH(splat.sh, objViewDir, _SHOrder, _SHOnly != 0);
-        col.a = min(splat.opacity * opacityScale, 65000);
-        view.color.x = (f32tof16(col.r) << 16) | f32tof16(col.g);
-        view.color.y = (f32tof16(col.b) << 16) | f32tof16(col.a);
-    }
+    bool outsideFrustum = any(abs(centerClipPos.xyz) > 1.3); // TODO: Is this portable on other graphics APIs?
+    if (outsideFrustum)
+        return;
     
-    _SplatViewData[idx] = view;
+    float4 boxRot = splat.rot;
+    float3 boxSize = splat.scale;
+
+    float3x3 splatRotScaleMat = CalcMatrixFromRotationScale(boxRot, boxSize);
+
+    float3 cov3d0, cov3d1;
+    CalcCovariance3D(splatRotScaleMat, cov3d0, cov3d1);
+    float splatScale2 = splatScale * splatScale;
+    cov3d0 *= splatScale2;
+    cov3d1 *= splatScale2;
+    float3 cov2d = CalcCovariance2D(splat.pos, cov3d0, cov3d1, _MatrixMV, _MatrixP, _VecScreenParams);
+    
+    DecomposeCovariance(cov2d, view.axis1, view.axis2);
+
+    float3 worldViewDir = _VecWorldSpaceCameraPos.xyz - centerWorldPos;
+    float3 objViewDir = mul((float3x3)_MatrixWorldToObject, worldViewDir);
+    objViewDir = normalize(objViewDir);
+
+    half4 col;
+    col.rgb = ShadeSH(splat.sh, objViewDir, _SHOrder, _SHOnly != 0);
+    col.a = min(splat.opacity * opacityScale, 65000);
+    view.color.x = (f32tof16(col.r) << 16) | f32tof16(col.g);
+    view.color.y = (f32tof16(col.b) << 16) | f32tof16(col.a);
+    
+    // Append to ViewSplatData
+    uint viewIdx;
+    InterlockedAdd(_ViewSplatCount[0], 1, viewIdx);
+    _SplatViewData[viewIdx] = view;
+    // for sorting
+    _SplatSortKeys[viewIdx] = viewIdx;
+    _SplatSortDistances[viewIdx] = FloatToSortableUint(-centerViewPos.z);
+}
+
+[numthreads(1,1,1)]
+void CSInitViewSplatIndirect () {
+    uint count = _ViewSplatCount[0];
+    count = min(count, _SplatCount); // Use _SplatCount as MaxViewSplatCount
+    _ViewSplatCount[0] = count;
+    _ViewSplatDrawIndirect[0] = 6;     // index count per instance (6 for a quad)
+    _ViewSplatDrawIndirect[1] = count; // instance count
+    _ViewSplatDrawIndirect[2] = 0;     // start index location
+    _ViewSplatDrawIndirect[3] = 0;     // base vertex location
+    _ViewSplatDrawIndirect[4] = 0;     // start instance location
 }
 
 RWStructuredBuffer<uint> _TileSplatSortDistances;
