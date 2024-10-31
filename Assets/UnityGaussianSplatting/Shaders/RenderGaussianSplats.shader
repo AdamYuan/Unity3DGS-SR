@@ -37,7 +37,9 @@ v2f vert (uint vtxID : SV_VertexID, uint instID : SV_InstanceID)
     v2f o = (v2f)0;
     instID = _OrderBuffer[instID];
 	SplatViewData view = _SplatViewData[instID];
-	float4 centerClipPos = view.pos;
+    float2 centerClipXY = float2(f16tof32(view.clipXY), f16tof32(view.clipXY >> 16u));
+	float2 axis1 = float2(f16tof32(view.axis.x), f16tof32(view.axis.x >> 16u));
+	float2 axis2 = float2(f16tof32(view.axis.y), f16tof32(view.axis.y >> 16u));
 
 	o.col.r = f16tof32(view.color.x >> 16);
 	o.col.g = f16tof32(view.color.x);
@@ -50,9 +52,9 @@ v2f vert (uint vtxID : SV_VertexID, uint instID : SV_InstanceID)
 
 	o.pos = quadPos;
 
-	float2 deltaScreenPos = (quadPos.x * view.axis1 + quadPos.y * view.axis2) * 2 / _ScreenParams.xy;
-	o.vertex = centerClipPos;
-	o.vertex.xy += deltaScreenPos * centerClipPos.w;
+	float2 deltaScreenPos = (quadPos.x * axis1 + quadPos.y * axis2) * 2 / _ScreenParams.xy;
+	o.vertex = float4(centerClipXY, 0, 1);
+	o.vertex.xy += deltaScreenPos;
     return o;
 }
 

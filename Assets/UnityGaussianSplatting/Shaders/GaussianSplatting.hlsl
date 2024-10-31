@@ -609,9 +609,9 @@ SplatData LoadSplatData(uint idx)
 
 struct SplatViewData
 {
-    float4 pos;
-    float2 axis1, axis2;
     uint2 color; // 4xFP16
+    uint2 axis;  // 4xFP16
+    uint clipXY; // 2xFP16
 };
 
 struct SplatTileViewData
@@ -619,7 +619,6 @@ struct SplatTileViewData
     uint2 color; // 4xFP16
     uint2 conic; // 3xFP16, 1xFP16 padding
     uint clipXY; // 2xFP16
-    uint padding;
 };
 
 #endif // GAUSSIAN_SPLATTING_HLSL

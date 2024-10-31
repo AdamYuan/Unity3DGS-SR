@@ -342,7 +342,6 @@ void CSCalcViewData (uint3 id : SV_DispatchThreadID)
         return;
 
     SplatData splat = LoadSplatData(idx);
-    SplatViewData view = (SplatViewData)0;
     
     float3 centerWorldPos = mul(_MatrixObjectToWorld, float4(splat.pos, 1)).xyz;
     float3 centerViewPos = mul(_MatrixMV, float4(splat.pos, 1)).xyz;
@@ -368,8 +367,6 @@ void CSCalcViewData (uint3 id : SV_DispatchThreadID)
         centerClipPos.w = 0;
     } */
 
-    view.pos = centerClipPos;
-
     bool behindCam = centerClipPos.w <= 0;
     if (behindCam)
         return;
@@ -392,7 +389,8 @@ void CSCalcViewData (uint3 id : SV_DispatchThreadID)
     cov3d1 *= splatScale2;
     float3 cov2d = CalcCovariance2D(splat.pos, cov3d0, cov3d1, _MatrixMV, _MatrixP, _VecScreenParams);
     
-    DecomposeCovariance(cov2d, view.axis1, view.axis2);
+    float2 axis1, axis2;
+    DecomposeCovariance(cov2d, axis1, axis2);
 
     float3 worldViewDir = _VecWorldSpaceCameraPos.xyz - centerWorldPos;
     float3 objViewDir = mul((float3x3)_MatrixWorldToObject, worldViewDir);
@@ -401,8 +399,13 @@ void CSCalcViewData (uint3 id : SV_DispatchThreadID)
     half4 col;
     col.rgb = ShadeSH(splat.sh, objViewDir, _SHOrder, _SHOnly != 0);
     col.a = min(splat.opacity * opacityScale, 65000);
+
+    SplatViewData view = (SplatViewData)0;
+    view.clipXY = f32tof16(centerClipPos.x) | (f32tof16(centerClipPos.y) << 16);
     view.color.x = (f32tof16(col.r) << 16) | f32tof16(col.g);
     view.color.y = (f32tof16(col.b) << 16) | f32tof16(col.a);
+    view.axis.x = f32tof16(axis1.x) | (f32tof16(axis1.y) << 16);
+    view.axis.y = f32tof16(axis2.x) | (f32tof16(axis2.y) << 16);
     
     // Append to ViewSplatData
     uint viewIdx;
