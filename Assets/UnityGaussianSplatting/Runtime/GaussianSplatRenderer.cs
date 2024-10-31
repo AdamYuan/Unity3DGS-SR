@@ -806,9 +806,9 @@ namespace GaussianSplatting.Runtime
             // Reset View Counters
             cmb.SetBufferData(m_GpuViewSplatCount, new uint[1]);
             
-            /* var data = new uint[1];
+            var data = new uint[1];
             m_GpuSubSplatCount.GetData(data);
-            Debug.Log(data[0]); */
+            Debug.Log(data[0]);
             
             // BEGIN Sub-Splat
             

@@ -7,7 +7,7 @@
 #define LOG_MAX_SUB_SPLAT_REF_COUNT 18 // kLogMaxSubSplatRefCount
 #define MAX_SUB_SPLAT_COUNT (1 << LOG_MAX_SUB_SPLAT_COUNT)
 #define MAX_SUB_SPLAT_REF_COUNT (1 << LOG_MAX_SUB_SPLAT_REF_COUNT)
-#define MAX_SUB_SPLAT_LEVEL 0          // at most (1 << MAX_SUB_SPLAT_LEVEL) Sub-Splats can be splitted from a Splat
+#define MAX_SUB_SPLAT_LEVEL 6          // at most (1 << MAX_SUB_SPLAT_LEVEL) Sub-Splats can be splitted from a Splat
 
 #if LOG_MAX_SUB_SPLAT_COUNT > 24
     #error LOG_MAX_SUB_SPLAT_COUNT too large
@@ -65,10 +65,21 @@ void SplitSubSplat(in const SubSplatData parentSubSplat, out SubSplatData o_subS
 }
 
 bool MergeSubSplat(in const SubSplatData subSplat0, in const SubSplatData subSplat1, inout SubSplatData io_parentSubSplat) {
-    // Default is remaining the parent sub-splat
-    // TODO: 
     return false;
-    // return true if something changed
+    // Default is remaining the parent sub-splat
+    // TODO: Implement this if needed, and remember to return true if something changed
+}
+
+uint CalcSplatLevel(
+    in const SplatData splat, 
+    float3 centerWorldPos, float3 centerViewPos, float3 centerClipPos,
+    float3x3 rotScaleMat, 
+    float3 cov3d0, float3 cov3d1,
+    float3 cov2d,
+    float2 screenWH
+) {
+    float d = max(0, -centerViewPos.z);
+    return uint(1.0 / d);
 }
 
 #endif
