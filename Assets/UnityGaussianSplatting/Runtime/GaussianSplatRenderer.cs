@@ -259,6 +259,13 @@ namespace GaussianSplatting.Runtime
         public const int kSplatTileBufferRatio = 3; // For tile-based renderer
         public const int kMaxTilesOnScreen = 1920 * 1080 * 4 / kSplatTileSize / kSplatTileSize; // Max possible tiles on screen
 
+        // Constants For Splat splitting
+        public const int kGpuSubSplatDataSize = 32; // Size of struct SubSplatData
+        public const int kLogMaxSubSplatCount = 18; // Don't change this
+        public const int kMaxSubSplatCount = 1 << kLogMaxSubSplatCount; // Don't change this
+        public const int kLogMaxSubSplatRefCount = 18; // Don't change this
+        public const int kMaxSubSplatRefCount = 1 << kLogMaxSubSplatRefCount; // Don't change this
+
         public GaussianSplatAsset m_Asset;
 
         [Range(0.1f, 2.0f)]
@@ -303,6 +310,21 @@ namespace GaussianSplatting.Runtime
         GraphicsBuffer m_GpuTileRanges;
         uint2[] m_GpuTileRangesClearData;
         GraphicsBuffer m_GpuTileSplatIndirect;
+        
+        // Buffers for Sub-Splat
+        GraphicsBuffer m_GpuSubSplatIDStack;
+        GraphicsBuffer m_GpuSubSplatCount;
+        GraphicsBuffer m_GpuSubSplatParents;
+        GraphicsBuffer m_GpuSubSplatRoots;
+        GraphicsBuffer m_GpuSubSplats;
+        GraphicsBuffer m_GpuSubSplatRefs0;
+        GraphicsBuffer m_GpuSubSplatRefs1;
+        GraphicsBuffer m_GpuSubSplatSplitRefs;
+        GraphicsBuffer m_GpuSubSplatMergeRefs;
+        GraphicsBuffer m_GpuSubSplatRefCount;
+        GraphicsBuffer m_GpuSubSplatRefIndirect;
+        GraphicsBuffer m_GpuSubSplatLevels;
+        bool m_SubSplatRefFlip = false;
 
 
         GraphicsBuffer m_GpuPosData;
@@ -380,6 +402,23 @@ namespace GaussianSplatting.Runtime
             public static readonly int TileRangesRO = Shader.PropertyToID("_TileRangesRO");
             public static readonly int CBTileSplatCount = Shader.PropertyToID("cbTileSplatCount");
             public static readonly int RenderTarget = Shader.PropertyToID("_RenderTarget");
+            
+            // BEGIN Props for Splat Splitting
+            public static readonly int SubSplatIDStack = Shader.PropertyToID("_SubSplatIDStack");
+            public static readonly int SubSplatCount = Shader.PropertyToID("_SubSplatCount");
+            public static readonly int SubSplatParents = Shader.PropertyToID("_SubSplatParents");
+            public static readonly int SubSplatRoots = Shader.PropertyToID("_SubSplatRoots");
+            public static readonly int SubSplats = Shader.PropertyToID("_SubSplats");
+            public static readonly int SubSplatSrcRefs = Shader.PropertyToID("_SubSplatSrcRefs");
+            public static readonly int SubSplatDstRefs = Shader.PropertyToID("_SubSplatDstRefs");
+            public static readonly int SubSplatSplitRefs = Shader.PropertyToID("_SubSplatSplitRefs");
+            public static readonly int SubSplatMergeRefs = Shader.PropertyToID("_SubSplatMergeRefs");
+            public static readonly int SubSplatRefCount = Shader.PropertyToID("_SubSplatRefCount");
+            public static readonly int CBSubSplatRefCount = Shader.PropertyToID("cbSubSplatRefCount");
+            public static readonly int SubSplatRefIndirect = Shader.PropertyToID("_SubSplatRefIndirect");
+            public static readonly int SubSplatLevels = Shader.PropertyToID("_SubSplatLevels");
+            // END Props for Splat Splitting
+
             public static readonly int SrcBuffer = Shader.PropertyToID("_SrcBuffer");
             public static readonly int DstBuffer = Shader.PropertyToID("_DstBuffer");
             public static readonly int BufferSize = Shader.PropertyToID("_BufferSize");
@@ -413,6 +452,7 @@ namespace GaussianSplatting.Runtime
         enum KernelIndices
         {
             CalcViewData,
+            CalcSubViewData,
             InitViewSplatIndirect,
             CalcTileViewData,
             InitTileSplatIndirect,
@@ -503,6 +543,40 @@ namespace GaussianSplatting.Runtime
             m_GpuTileRangesClearData = new uint2[kMaxTilesOnScreen];
 
             InitSortBuffers(splatCount);
+            InitSubSplatBuffers(splatCount);
+        }
+        
+        void InitSubSplatBuffers(int count) {
+            m_GpuSubSplatIDStack = new GraphicsBuffer(GraphicsBuffer.Target.Structured, kMaxSubSplatCount / 2, sizeof(uint));
+            uint[] splatIDStack = new uint[kMaxSubSplatCount / 2];
+            for (uint i = 0; i < kMaxSubSplatCount / 2; ++i)
+                splatIDStack[i] = i * 2;
+            m_GpuSubSplatIDStack.SetData(splatIDStack);
+            
+            m_GpuSubSplatCount = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 1, sizeof(uint));
+            m_GpuSubSplatCount.SetData(new uint[1]);
+
+            m_GpuSubSplatParents = new GraphicsBuffer(GraphicsBuffer.Target.Structured, kMaxSubSplatCount / 2, sizeof(uint));
+            m_GpuSubSplatRoots = new GraphicsBuffer(GraphicsBuffer.Target.Structured, kMaxSubSplatCount / 2, sizeof(uint));
+            m_GpuSubSplats = new GraphicsBuffer(GraphicsBuffer.Target.Structured, kMaxSubSplatCount, kGpuSubSplatDataSize);
+
+            m_GpuSubSplatRefs0 = new GraphicsBuffer(GraphicsBuffer.Target.Structured, kMaxSubSplatRefCount, sizeof(uint));
+            m_GpuSubSplatRefs1 = new GraphicsBuffer(GraphicsBuffer.Target.Structured, kMaxSubSplatRefCount, sizeof(uint));
+            m_GpuSubSplatSplitRefs = new GraphicsBuffer(GraphicsBuffer.Target.Structured, kMaxSubSplatRefCount, sizeof(uint));
+            m_GpuSubSplatMergeRefs = new GraphicsBuffer(GraphicsBuffer.Target.Structured, kMaxSubSplatRefCount, sizeof(uint));
+            m_GpuSubSplatRefCount = new GraphicsBuffer(
+                GraphicsBuffer.Target.Structured | GraphicsBuffer.Target.Constant, 
+                3, sizeof(uint)
+            );
+            m_GpuSubSplatRefCount.SetData(new uint[3]);
+            m_GpuSubSplatRefIndirect = new GraphicsBuffer(
+                GraphicsBuffer.Target.Structured | GraphicsBuffer.Target.IndirectArguments, 
+                9, sizeof(uint)
+            );
+            m_GpuSubSplatRefIndirect.SetData(new uint[9]{0, 1, 1, 0, 1, 1, 0, 1, 1});
+
+            m_GpuSubSplatLevels = new GraphicsBuffer(GraphicsBuffer.Target.Structured, count, sizeof(uint));
+            m_GpuSubSplatLevels.SetData(new uint[count]);
         }
 
         void InitSortBuffers(int count)
@@ -593,6 +667,27 @@ namespace GaussianSplatting.Runtime
             mat.SetInteger(Props.SplatChunkCount, m_GpuChunksValid ? m_GpuChunks.count : 0);
         }
 
+        void SetSubSplatDataOnCS(CommandBuffer cmb, KernelIndices kernel)
+        {
+            ComputeShader cs = m_CSSplatUtilities;
+            int kernelIndex = (int)kernel;
+
+            cmb.SetComputeBufferParam(cs, kernelIndex, Props.SubSplatIDStack, m_GpuSubSplatIDStack);
+            cmb.SetComputeBufferParam(cs, kernelIndex, Props.SubSplatCount, m_GpuSubSplatCount);
+            cmb.SetComputeBufferParam(cs, kernelIndex, Props.SubSplatParents, m_GpuSubSplatParents);
+            cmb.SetComputeBufferParam(cs, kernelIndex, Props.SubSplatRoots, m_GpuSubSplatRoots);
+            cmb.SetComputeBufferParam(cs, kernelIndex, Props.SubSplats, m_GpuSubSplats);
+
+            cmb.SetComputeBufferParam(cs, kernelIndex, Props.SubSplatSrcRefs, m_SubSplatRefFlip ? m_GpuSubSplatRefs0 : m_GpuSubSplatRefs1);
+            cmb.SetComputeBufferParam(cs, kernelIndex, Props.SubSplatDstRefs, m_SubSplatRefFlip ? m_GpuSubSplatRefs1 : m_GpuSubSplatRefs0);
+            cmb.SetComputeBufferParam(cs, kernelIndex, Props.SubSplatSplitRefs, m_GpuSubSplatSplitRefs);
+            cmb.SetComputeBufferParam(cs, kernelIndex, Props.SubSplatMergeRefs, m_GpuSubSplatMergeRefs);
+            cmb.SetComputeConstantBufferParam(cs, Props.CBSubSplatRefCount, m_GpuSubSplatRefCount, 0, 3 * sizeof(uint));
+            cmb.SetComputeBufferParam(cs, kernelIndex, Props.SubSplatRefCount, m_GpuSubSplatRefCount);
+            cmb.SetComputeBufferParam(cs, kernelIndex, Props.SubSplatRefIndirect, m_GpuSubSplatRefIndirect);
+            cmb.SetComputeBufferParam(cs, kernelIndex, Props.SubSplatLevels, m_GpuSubSplatLevels);
+        }
+
         static void DisposeBuffer(ref GraphicsBuffer buf)
         {
             buf?.Dispose();
@@ -621,6 +716,19 @@ namespace GaussianSplatting.Runtime
             DisposeBuffer(ref m_GpuTileSplatCount);
             DisposeBuffer(ref m_GpuTileRanges);
             DisposeBuffer(ref m_GpuTileSplatIndirect);
+            
+            DisposeBuffer(ref m_GpuSubSplatIDStack);
+            DisposeBuffer(ref m_GpuSubSplatCount);
+            DisposeBuffer(ref m_GpuSubSplatParents);
+            DisposeBuffer(ref m_GpuSubSplatRoots);
+            DisposeBuffer(ref m_GpuSubSplats);
+            DisposeBuffer(ref m_GpuSubSplatRefs0);
+            DisposeBuffer(ref m_GpuSubSplatRefs1);
+            DisposeBuffer(ref m_GpuSubSplatSplitRefs);
+            DisposeBuffer(ref m_GpuSubSplatMergeRefs);
+            DisposeBuffer(ref m_GpuSubSplatRefCount);
+            DisposeBuffer(ref m_GpuSubSplatRefIndirect);
+            DisposeBuffer(ref m_GpuSubSplatLevels);
 
             DisposeBuffer(ref m_GpuEditSelectedMouseDown);
             DisposeBuffer(ref m_GpuEditPosMouseDown);
@@ -658,6 +766,8 @@ namespace GaussianSplatting.Runtime
         {
             if (cam.cameraType == CameraType.Preview)
                 return;
+            
+            m_SubSplatRefFlip = !m_SubSplatRefFlip;
 
             var tr = transform;
 
@@ -671,6 +781,7 @@ namespace GaussianSplatting.Runtime
 
             // calculate view dependent data for each splat
             SetAssetDataOnCS(cmb, KernelIndices.CalcViewData);
+            SetSubSplatDataOnCS(cmb, KernelIndices.CalcViewData);
 
             cmb.SetComputeMatrixParam(m_CSSplatUtilities, Props.MatrixVP, matProj * matView);
             cmb.SetComputeMatrixParam(m_CSSplatUtilities, Props.MatrixMV, matView * matO2W);
