@@ -7,6 +7,10 @@
 
 #define MAX_TILE_PER_SPLAT 0xFFFF // Pack 8 bits upon splat ID and 8 bits upon distance
 
+#pragma kernel CSInitSubSplatIndirect
+#pragma kernel CSSplitSubSplats
+#pragma kernel CSMergeSubSplats
+#pragma kernel CSFixSubSplatAlloc
 #pragma kernel CSCalcViewData
 #pragma kernel CSCalcSubViewData
 #pragma kernel CSInitViewSplatIndirect
@@ -48,6 +52,7 @@
 // Must be included after kernel definitions
 #include "GPUSorting/OneSweep.hlsl"
 #include "GaussianSplatting.hlsl"
+#include "SubSplat.hlsl"
 
 float4x4 _MatrixObjectToWorld;
 float4x4 _MatrixWorldToObject;
@@ -117,85 +122,6 @@ RWByteAddressBuffer _SplatSelectedBits;
 ByteAddressBuffer _SplatDeletedBits;
 uint _SplatBitsValid;
 
-void DecomposeCovariance(float3 cov2d, out float2 v1, out float2 v2)
-{
-    #if 0 // does not quite give the correct results?
-
-    // https://jsfiddle.net/mattrossman/ehxmtgw6/
-    // References:
-    // - https://www.youtube.com/watch?v=e50Bj7jn9IQ
-    // - https://en.wikipedia.org/wiki/Eigenvalue_algorithm#2%C3%972_matrices
-    // - https://people.math.harvard.edu/~knill/teaching/math21b2004/exhibits/2dmatrices/index.html
-    float a = cov2d.x;
-    float b = cov2d.y;
-    float d = cov2d.z;
-    float det = a * d - b * b; // matrix is symmetric, so "c" is same as "b"
-    float trace = a + d;
-
-    float mean = 0.5 * trace;
-    float dist = sqrt(mean * mean - det);
-
-    float lambda1 = mean + dist; // 1st eigenvalue
-    float lambda2 = mean - dist; // 2nd eigenvalue
-
-    if (b == 0) {
-        // https://twitter.com/the_ross_man/status/1706342719776551360
-        if (a > d) v1 = float2(1, 0);
-        else v1 = float2(0, 1);
-    } else
-        v1 = normalize(float2(b, d - lambda2));
-
-    v1.y = -v1.y;
-    // The 2nd eigenvector is just a 90 degree rotation of the first since Gaussian axes are orthogonal
-    v2 = float2(v1.y, -v1.x);
-
-    // scaling components
-    v1 *= sqrt(lambda1);
-    v2 *= sqrt(lambda2);
-
-    float radius = 1.5;
-    v1 *= radius;
-    v2 *= radius;
-
-    #else
-
-    // same as in antimatter15/splat
-    float diag1 = cov2d.x, diag2 = cov2d.z, offDiag = cov2d.y;
-    float mid = 0.5f * (diag1 + diag2);
-    float radius = length(float2((diag1 - diag2) / 2.0, offDiag));
-    float lambda1 = mid + radius;
-    float lambda2 = max(mid - radius, 0.1);
-    float2 diagVec = normalize(float2(offDiag, lambda1 - diag1));
-    diagVec.y = -diagVec.y;
-    float maxSize = 4096.0;
-    v1 = min(sqrt(2.0 * lambda1), maxSize) * diagVec;
-    v2 = min(sqrt(2.0 * lambda2), maxSize) * float2(diagVec.y, -diagVec.x);
-
-    #endif
-}
-
-float Calc2DRadius(float3 cov2d) {
-    // https://github.com/graphdeco-inria/diff-gaussian-rasterization/blob/main/cuda_rasterizer/forward.cu
-    float diag1 = cov2d.x, diag2 = cov2d.z, offDiag = cov2d.y;
-    float mid = 0.5f * (diag1 + diag2);
-    float radius = length(float2((diag1 - diag2) / 2.0, offDiag));
-    float lambda1 = mid + radius;
-    float lambda2 = max(mid - radius, 0.1);
-    return 3.0 * sqrt(max(lambda1, lambda2));
-}
-
-float2 Calc2DRect(float3 cov2d) {
-    float diag1 = cov2d.x, diag2 = cov2d.z, offDiag = cov2d.y;
-    float mid = 0.5f * (diag1 + diag2);
-    float radius = length(float2((diag1 - diag2) / 2.0, offDiag));
-    float lambda1 = mid + radius;
-    float lambda2 = max(mid - radius, 0.1);
-    float2 diagVec = normalize(float2(offDiag, lambda1 - diag1));
-    float2 v1 = sqrt(lambda1) * diagVec;
-    float2 v2 = sqrt(lambda2) * float2(diagVec.y, -diagVec.x);
-    return 3.0 * (abs(v1) + abs(v2));
-}
-
 bool IsSplatCut(float3 pos)
 {
     bool finalCut = false;
@@ -221,71 +147,11 @@ bool IsSplatCut(float3 pos)
     return finalCut;
 }
 
-#define LOG_MAX_SUB_SPLAT_COUNT 18
-#define MAX_SUB_SPLAT_COUNT (1 << LOG_MAX_SUB_SPLAT_COUNT)
-#define LOG_MAX_SUB_SPLAT_REF_COUNT 18
-#define MAX_SUB_SPLAT_REF_COUNT (1 << LOG_MAX_SUB_SPLAT_REF_COUNT)
-#define LOG_MAX_SUB_SPLAT_LEVEL 4
-#define MAX_SUB_SPLAT_LEVEL (1 << LOG_MAX_SUB_SPLAT_LEVEL)
-
-#if LOG_MAX_SUB_SPLAT_COUNT > 24
-    #error LOG_MAX_SUB_SPLAT_COUNT too large
-#endif
-
-struct SubSplatData {
-    float3 pos;
-    uint rootSplatID;
-    uint2 rotFP16x4;
-    uint2 scaleOpacityFP16x4;
-};
-
-SubSplatData GetSubSplatFromSplat(uint splatID, in const SplatData splat) {
-    SubSplatData ret;
-    ret.pos = splat.pos;
-    ret.rootSplatID = splatID;
-    ret.rotFP16x4 = uint2(
-        f32tof16(splat.rot.x) | f32tof16(splat.rot.y) << 16, 
-        f32tof16(splat.rot.z) | f32tof16(splat.rot.w) << 16
-    );
-    ret.scaleOpacityFP16x4 = uint2(
-        f32tof16(splat.scale.x) | f32tof16(splat.scale.y) << 16, 
-        f32tof16(splat.scale.z) | f32tof16(float(splat.opacity)) << 16
-    );
-    return ret;
-}
-
-SplatData GetSplatFromSubSplat(in const SubSplatData subSplat) {
-    SplatData ret;
-    ret = LoadSplatData(subSplat.rootSplatID);
-    ret.pos = subSplat.pos;
-    ret.rot = float4(
-        f16tof32(subSplat.rotFP16x4.x), f16tof32(subSplat.rotFP16x4.x >> 16),
-        f16tof32(subSplat.rotFP16x4.y), f16tof32(subSplat.rotFP16x4.y >> 16)
-    );
-    ret.scale = float3(
-        f16tof32(subSplat.scaleOpacityFP16x4.x), f16tof32(subSplat.scaleOpacityFP16x4.x >> 16),
-        f16tof32(subSplat.scaleOpacityFP16x4.y)
-    );
-    ret.opacity = f16tof32(subSplat.scaleOpacityFP16x4.y >> 16);
-    return ret;
-}
-
-void SplitSubSplat(in const SubSplatData parentSubSplat, out SubSplatData o_subSplat0, out SubSplatData o_subSplat1) {
-    // TODO:
-    o_subSplat0 = parentSubSplat;
-    o_subSplat1 = parentSubSplat;
-}
-
-void MergeSubSplat(in const SubSplatData subSplat0, in const SubSplatData subSplat1, inout SubSplatData io_parentSubSplat) {
-    // Default is remaining the parent sub-splat
-    // TODO: 
-}
-
 RWStructuredBuffer<uint> _SubSplatIDStack; // [MAX_SUB_SPLAT_COUNT / 2], initialized as (0, 2, 4, ..., MAX_SUB_SPLAT_COUNT - 2)
 RWStructuredBuffer<uint> _SubSplatCount;
 RWStructuredBuffer<uint> _SubSplatParents; // [MAX_SUB_SPLAT_COUNT / 2]
 RWStructuredBuffer<uint> _SubSplatRoots; // [MAX_SUB_SPLAT_COUNT / 2]
-StructuredBuffer<SubSplatData> _SubSplats; // [MAX_SUB_SPLAT_COUNT]
+RWStructuredBuffer<SubSplatData> _SubSplats; // [MAX_SUB_SPLAT_COUNT]
 // Sub-Splat ID Management
 uint AllocSubSplat() {
     uint idx;
@@ -305,10 +171,10 @@ void FreeSubSplat(uint subSplatID) {
     // (int)idx >= 0 is guarenteed if there's no more free's than allocates
     _SubSplatIDStack[idx] = subSplatID;
 }
-uint GetSubSplatParentID(uint subSplatID) {
+uint GetSubSplatParentRef(uint subSplatID) {
     return _SubSplatParents[subSplatID >> 1];
 }
-void SetSubSplatParentID(uint subSplatID, uint parentSubSplatID) {
+void SetSubSplatParentRef(uint subSplatID, uint parentSubSplatID) {
     // Must ensure subSplatID % 2 == 0
     _SubSplatParents[subSplatID >> 1] = parentSubSplatID;
 }
@@ -356,12 +222,13 @@ void DecodeSubSplatRef(uint subSplatRef, out uint o_subSplatID, out uint o_level
     o_subSplatID = subSplatRef & 0xFFFFFF;
     o_level = subSplatRef >> 24;
 }
-void PushSubSplatRef(uint subSplatRef) {
+void PushSubSplatRef(uint subSplatRef, uint count = 1) {
     uint idx;
-    InterlockedAdd(_SubSplatRefCount[0].refCount, 1, idx);
-    if (idx >= MAX_SUB_SPLAT_REF_COUNT)
-        return;
+    InterlockedAdd(_SubSplatRefCount[0].refCount, count, idx);
+    // Will not exceed limit because PushSubSplatRef is always called after AllocSubSplat
     _SubSplatDstRefs[idx] = subSplatRef;
+    if (count == 2)
+        _SubSplatDstRefs[idx | 1] = subSplatRef | 1;
 }
 void PushSubSplatSplitRef(uint subSplatRef) {
     uint idx;
@@ -379,18 +246,18 @@ void PushSubSplatMergeRef(uint subSplatRef) {
     _SubSplatMergeRefs[idx] = subSplatRef;
 }
 
-RWBuffer<uint> _SubSplatLevels; // [_SplatCount], maintaining level of each splat, initialized as all zero
+RWStructuredBuffer<uint> _SubSplatLevels; // [_SplatCount], maintaining level of each splat, initialized as all zero
 
 void UpdateSplatLevel(uint splatID, uint prevSplatLevel, uint splatLevel) {
-    splatLevel = min(splatLevel, MAX_SUB_SPLAT_LEVEL - 1);
+    splatLevel = min(splatLevel, MAX_SUB_SPLAT_LEVEL);
     if (splatLevel != prevSplatLevel) {
         if (prevSplatLevel == 0 && splatLevel > 0)
             PushSubSplatSplitRef(EncodeSubSplatRef(splatID, 0));
-        _SubSplatLevels[splatID] = splatLevel;
+        _SubSplatLevels[splatID] = prevSplatLevel + (splatLevel > prevSplatLevel ? 1 : -1);
     }
 }
 
-// prevSplatLevel \in [1, MAX_SUB_SPLAT_LEVEL - 1] is guarenteed
+// prevSplatLevel \in [1, MAX_SUB_SPLAT_LEVEL] is guarenteed
 void UpdateSubSplatLevel(uint splatID, uint prevSplatLevel, uint subSplatRef) {
     uint subSplatID, subSplatLevel;
     DecodeSubSplatRef(subSplatRef, subSplatID, subSplatLevel);
@@ -401,6 +268,86 @@ void UpdateSubSplatLevel(uint splatID, uint prevSplatLevel, uint subSplatRef) {
         PushSubSplatSplitRef(subSplatRef);
     else if ((subSplatRef & 1) == 0)
         PushSubSplatMergeRef(subSplatRef);
+}
+
+[numthreads(1,1,1)]
+void CSInitSubSplatIndirect () {
+    SubSplatRefCount count = _SubSplatRefCount[0];
+    count.refCount = min(count.refCount, MAX_SUB_SPLAT_REF_COUNT);
+    count.splitRefCount = min(count.splitRefCount, MAX_SUB_SPLAT_REF_COUNT);
+    count.mergeRefCount = min(count.mergeRefCount, MAX_SUB_SPLAT_REF_COUNT);
+    _SubSplatRefCount[0] = count;
+    
+    _SubSplatRefIndirect[0].refGroupX = (count.refCount + GROUP_SIZE - 1) / GROUP_SIZE;
+    _SubSplatRefIndirect[0].splitRefGroupX = (count.splitRefCount + GROUP_SIZE - 1) / GROUP_SIZE;
+    _SubSplatRefIndirect[0].mergeRefGroupX = (count.mergeRefCount + GROUP_SIZE - 1) / GROUP_SIZE;
+}
+
+[numthreads(GROUP_SIZE,1,1)]
+void CSSplitSubSplats(uint3 threadID : SV_DispatchThreadID) {
+    uint idx = threadID.x;
+    if (idx >= e_subSplatSplitRefCount)
+        return;
+    
+    uint subSplatRef = _SubSplatSplitRefs[idx];
+    uint subSplatID, subSplatLevel;
+    DecodeSubSplatRef(subSplatRef, subSplatID, subSplatLevel);
+
+    uint splatID;
+    SubSplatData subSplat;
+    if (subSplatLevel == 0) {
+        splatID = subSplatID;
+        subSplat = GetSubSplatFromSplat(splatID, LoadSplatData(splatID));
+    } else {
+        subSplat = _SubSplats[subSplatID];
+        splatID = GetSubSplatRootSplatID(subSplatID);
+    }
+    
+    uint chSubSplatID = AllocSubSplat();
+    if (chSubSplatID == -1)
+        return;
+    
+    SubSplatData chSubSplat0, chSubSplat1;
+    SplitSubSplat(subSplat, chSubSplat0, chSubSplat1);
+    _SubSplats[chSubSplatID | 0] = chSubSplat0;
+    _SubSplats[chSubSplatID | 1] = chSubSplat1;
+
+    SetSubSplatRootSplatID(chSubSplatID, splatID);
+    SetSubSplatParentRef(chSubSplatID, subSplatRef);
+    uint chSubSplatRef = EncodeSubSplatRef(chSubSplatID, subSplatLevel + 1);
+    PushSubSplatRef(chSubSplatRef, 2);
+}
+
+[numthreads(GROUP_SIZE,1,1)]
+void CSMergeSubSplats(uint3 threadID : SV_DispatchThreadID) {
+    uint idx = threadID.x;
+    if (idx >= e_subSplatMergeRefCount)
+        return;
+
+    uint subSplatRef = _SubSplatMergeRefs[idx];
+    uint subSplatID, subSplatLevel;
+    DecodeSubSplatRef(subSplatRef, subSplatID, subSplatLevel);
+    
+    FreeSubSplat(subSplatID);
+    
+    if (subSplatLevel == 1)
+        return;
+    
+    uint paSubSplatRef = GetSubSplatParentRef(subSplatID);
+    PushSubSplatRef(paSubSplatRef);
+    
+    uint paSubSplatID, _;
+    DecodeSubSplatRef(paSubSplatRef, paSubSplatID, _);
+
+    SubSplatData paSubSplat = _SubSplats[paSubSplatID];
+    if (MergeSubSplat(_SubSplats[subSplatID | 0], _SubSplats[subSplatID | 1], paSubSplat)) {
+        _SubSplats[paSubSplatID] = paSubSplat;
+    }
+}
+
+[numthreads(1,1,1)]
+void CSFixSubSplatAlloc () {
+    FixSubSplatAllocator();
 }
 
 RWStructuredBuffer<uint> _ViewSplatCount;
@@ -493,6 +440,9 @@ void CalcViewData(in const SplatData splat, bool discardSplat, out uint o_splatL
     view.axis.x = f32tof16(axis1.x) | (f32tof16(axis1.y) << 16);
     view.axis.y = f32tof16(axis2.x) | (f32tof16(axis2.y) << 16);
     
+    splatLevel = centerViewPos.z > -1.0 ? 1 : 0; // For test
+
+    
     o_splatLevel = splatLevel;
     
     if (discardSplat)
@@ -525,7 +475,7 @@ void CSCalcSubViewData (uint3 id : SV_DispatchThreadID)
     if (LoadSplatContext(id, true, ctx)) {
         uint splatLevel;
         CalcViewData(ctx.splat, ctx.discardSplat, splatLevel);
-        UpdateSubSplatLevel(ctx.splatID, ctx.discardSplat, ctx.subSplatRef);
+        UpdateSubSplatLevel(ctx.splatID, ctx.prevSplatLevel, ctx.subSplatRef);
     }
 }
 
