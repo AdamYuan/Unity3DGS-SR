@@ -3,8 +3,6 @@
 
 #include "GaussianSplatting.hlsl"
 
-#pragma Native16Bit
-
 #define SUB_SPLAT_MERGE 0               // Disable explicit merge by default
 #define MAX_SUB_SPLAT_LEVEL 4           // at most (1 << MAX_SUB_SPLAT_LEVEL) Sub-Splats can be splitted from a Splat
 #define LOG_MAX_SUB_SPLAT_COUNT 18      // kLogMaxSubSplatCount
