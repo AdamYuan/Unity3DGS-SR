@@ -10,7 +10,7 @@
 #pragma kernel CSInitSubSplatIndirect
 #pragma kernel CSSplitSubSplats
 #pragma kernel CSMergeSubSplats
-#pragma kernel CSFixSubSplatAlloc
+#pragma kernel CSInitSubSplats
 #pragma kernel CSCalcViewData
 #pragma kernel CSCalcSubViewData
 #pragma kernel CSInitViewSplatIndirect
@@ -160,9 +160,6 @@ uint AllocSubSplat() {
         return -1;
     return _SubSplatIDStack[idx];
 }
-void FixSubSplatAllocator() {
-    _SubSplatCount[0] = min(_SubSplatCount[0], MAX_SUB_SPLAT_COUNT / 2);
-}
 void FreeSubSplat(uint subSplatID) {
     // Must ensure _SubSplatCount[0] <= MAX_SUB_SPLAT_COUNT / 2 and subSplatID % 2 == 0
     uint idx;
@@ -191,16 +188,33 @@ StructuredBuffer<uint>   _SubSplatSrcRefs;   // [MAX_SUB_SPLAT_REF_COUNT]
 RWStructuredBuffer<uint> _SubSplatDstRefs;   // [MAX_SUB_SPLAT_REF_COUNT]
 RWStructuredBuffer<uint> _SubSplatSplitRefs; // [MAX_SUB_SPLAT_REF_COUNT]
 RWStructuredBuffer<uint> _SubSplatMergeRefs; // [MAX_SUB_SPLAT_REF_COUNT]
+RWStructuredBuffer<uint> _SubSplatInitIDs;   // [MAX_SUB_SPLAT_INIT_COUNT]
 struct SubSplatRefCount {
     uint refCount;
     uint splitRefCount;
     uint mergeRefCount;
+    uint initCount;
+    uint splitStackOfst;
+    uint mergeStackOfst;
+    uint initStackOfst;
+    uint splitRefOfst;
+    uint mergeRefOfst;
+    uint initRefOfst;
+    uint splitDisabled;
 };
 RWStructuredBuffer<SubSplatRefCount> _SubSplatRefCount;
 cbuffer cbSubSplatRefCount {
     uint e_subSplatRefCount;
     uint e_subSplatSplitRefCount;
     uint e_subSplatMergeRefCount;
+    uint e_subSplatInitCount;
+    uint e_subSplatSplitStackOfst;
+    uint e_subSplatMergeStackOfst;
+    uint e_subSplatInitStackOfst;
+    uint e_subSplatSplitRefOfst;
+    uint e_subSplatMergeRefOfst;
+    uint e_subSplatInitRefOfst;
+    uint e_subSplatSplitDisabled;
 };
 struct SubSplatRefIndirect {
     uint refGroupX;
@@ -212,6 +226,9 @@ struct SubSplatRefIndirect {
     uint mergeRefGroupX;
     uint mergeRefGroupY;
     uint mergeRefGroupZ;
+    uint initGroupX;
+    uint initGroupY;
+    uint initGroupZ;
 };
 RWStructuredBuffer<SubSplatRefIndirect> _SubSplatRefIndirect;
 // subSplatID could be set to splatID if level == 0
@@ -222,28 +239,31 @@ void DecodeSubSplatRef(uint subSplatRef, out uint o_subSplatID, out uint o_level
     o_subSplatID = subSplatRef & 0xFFFFFF;
     o_level = subSplatRef >> 24;
 }
-void PushSubSplatRef(uint subSplatRef, uint count = 1) {
+void PushSubSplatRef(uint subSplatRef) {
     uint idx;
-    InterlockedAdd(_SubSplatRefCount[0].refCount, count, idx);
+    InterlockedAdd(_SubSplatRefCount[0].refCount, 1, idx);
     // Will not exceed limit because PushSubSplatRef is always called after AllocSubSplat
     _SubSplatDstRefs[idx] = subSplatRef;
-    if (count == 2)
-        _SubSplatDstRefs[idx | 1] = subSplatRef | 1;
 }
 void PushSubSplatSplitRef(uint subSplatRef) {
     uint idx;
     InterlockedAdd(_SubSplatRefCount[0].splitRefCount, 1, idx);
-    if (idx >= MAX_SUB_SPLAT_REF_COUNT)
-        return;
+    // Will not exceed limit because PushSubSplatSplitRef is called at most once per Sub-Splat-Ref
     _SubSplatSplitRefs[idx] = subSplatRef;
 }
 void PushSubSplatMergeRef(uint subSplatRef) {
     // subSplatRef % 2 == 0 is guarenteed
     uint idx;
     InterlockedAdd(_SubSplatRefCount[0].mergeRefCount, 1, idx);
-    if (idx >= MAX_SUB_SPLAT_REF_COUNT)
-        return;
+    // Will not exceed limit because PushSubSplatMergeRef is called at most once per Sub-Splat-Ref
     _SubSplatMergeRefs[idx] = subSplatRef;
+}
+void PushSubSplatInitID(uint splatID) {
+    uint idx;
+    InterlockedAdd(_SubSplatRefCount[0].initCount, 1, idx);
+    if (idx >= MAX_SUB_SPLAT_INIT_COUNT)
+        return;
+    _SubSplatInitIDs[idx] = splatID;
 }
 
 RWStructuredBuffer<uint> _SubSplatLevels; // [_SplatCount], maintaining level of each splat, initialized as all zero
@@ -252,7 +272,7 @@ void UpdateSplatLevel(uint splatID, uint prevSplatLevel, uint splatLevel) {
     splatLevel = min(splatLevel, MAX_SUB_SPLAT_LEVEL);
     if (splatLevel != prevSplatLevel) {
         if (prevSplatLevel == 0 && splatLevel > 0)
-            PushSubSplatSplitRef(EncodeSubSplatRef(splatID, 0));
+            PushSubSplatInitID(splatID);
         _SubSplatLevels[splatID] = prevSplatLevel + (splatLevel > prevSplatLevel ? 1 : -1);
     }
 }
@@ -261,26 +281,87 @@ void UpdateSplatLevel(uint splatID, uint prevSplatLevel, uint splatLevel) {
 void UpdateSubSplatLevel(uint splatID, uint prevSplatLevel, uint subSplatRef) {
     uint subSplatID, subSplatLevel;
     DecodeSubSplatRef(subSplatRef, subSplatID, subSplatLevel);
-
+    
+    bool split = subSplatLevel < prevSplatLevel, merge = subSplatLevel > prevSplatLevel;
+    
     if (subSplatLevel == prevSplatLevel)
         PushSubSplatRef(subSplatRef);
     else if (subSplatLevel < prevSplatLevel)
         PushSubSplatSplitRef(subSplatRef);
-    else if ((subSplatRef & 1) == 0)
-        PushSubSplatMergeRef(subSplatRef);
+    else if ((subSplatRef & 1) == 0) {
+        if (subSplatLevel > 1)
+            PushSubSplatMergeRef(subSplatRef);
+        else
+            FreeSubSplat(subSplatID);
+    }
 }
 
 [numthreads(1,1,1)]
 void CSInitSubSplatIndirect () {
     SubSplatRefCount count = _SubSplatRefCount[0];
-    count.refCount = min(count.refCount, MAX_SUB_SPLAT_REF_COUNT);
-    count.splitRefCount = min(count.splitRefCount, MAX_SUB_SPLAT_REF_COUNT);
-    count.mergeRefCount = min(count.mergeRefCount, MAX_SUB_SPLAT_REF_COUNT);
+    
+    // Call order: Merge -> Init -> Split
+    uint stackOfst = _SubSplatCount[0];
+    uint refOfst = count.refCount;
+
+    // Merge
+    stackOfst -= count.mergeRefCount;
+    count.mergeStackOfst = stackOfst;
+    count.mergeRefOfst = refOfst;
+    refOfst += count.mergeRefCount;
+    
+    // Init
+    count.initStackOfst = stackOfst;
+    count.initRefOfst = refOfst;
+    count.initCount = min(count.initCount, MAX_SUB_SPLAT_INIT_COUNT);
+    if (stackOfst + count.initCount > MAX_SUB_SPLAT_COUNT / 2) 
+        count.initCount = MAX_SUB_SPLAT_COUNT / 2 - stackOfst;
+    stackOfst += count.initCount;
+    refOfst += count.initCount << 1;
+    
+    // Split
+    count.splitStackOfst = stackOfst;
+    count.splitRefOfst = refOfst;
+    // If not all sub-splats can be split, then ignore the split
+    if (stackOfst + count.splitRefCount > MAX_SUB_SPLAT_COUNT / 2) {
+        count.splitDisabled = 1;
+        refOfst += count.splitRefCount;
+    } else {
+        count.splitDisabled = 0;
+        stackOfst += count.splitRefCount;
+        refOfst += count.splitRefCount << 1;
+    }
+    
+    count.refCount = refOfst;
+    _SubSplatCount[0] = stackOfst;
     _SubSplatRefCount[0] = count;
     
     _SubSplatRefIndirect[0].refGroupX = (count.refCount + GROUP_SIZE - 1) / GROUP_SIZE;
     _SubSplatRefIndirect[0].splitRefGroupX = (count.splitRefCount + GROUP_SIZE - 1) / GROUP_SIZE;
     _SubSplatRefIndirect[0].mergeRefGroupX = (count.mergeRefCount + GROUP_SIZE - 1) / GROUP_SIZE;
+    _SubSplatRefIndirect[0].initGroupX = (count.initCount + GROUP_SIZE - 1) / GROUP_SIZE;
+}
+
+[numthreads(GROUP_SIZE,1,1)]
+void CSInitSubSplats(uint3 threadID : SV_DispatchThreadID) {
+    uint idx = threadID.x;
+    if (idx >= e_subSplatInitCount)
+        return;
+    
+    uint splatID = _SubSplatInitIDs[idx];
+    SubSplatData subSplat = GetSubSplatFromSplat(splatID, LoadSplatData(splatID));
+    
+    uint chSubSplatID = _SubSplatIDStack[e_subSplatInitStackOfst + idx]; // Allocate Sub-Splat
+    
+    SubSplatData chSubSplat0, chSubSplat1;
+    SplitSubSplat(subSplat, chSubSplat0, chSubSplat1);
+    _SubSplats[chSubSplatID | 0] = chSubSplat0;
+    _SubSplats[chSubSplatID | 1] = chSubSplat1;
+
+    SetSubSplatRootSplatID(chSubSplatID, splatID);
+    uint chSubSplatRef = EncodeSubSplatRef(chSubSplatID, 1);
+    _SubSplatDstRefs[e_subSplatInitRefOfst + (idx << 1 | 0)] = chSubSplatRef | 0;
+    _SubSplatDstRefs[e_subSplatInitRefOfst + (idx << 1 | 1)] = chSubSplatRef | 1;
 }
 
 [numthreads(GROUP_SIZE,1,1)]
@@ -290,22 +371,19 @@ void CSSplitSubSplats(uint3 threadID : SV_DispatchThreadID) {
         return;
     
     uint subSplatRef = _SubSplatSplitRefs[idx];
+    
+    if (e_subSplatSplitDisabled) {
+        _SubSplatDstRefs[e_subSplatSplitRefOfst + idx] = subSplatRef;
+        return;
+    }
+
     uint subSplatID, subSplatLevel;
     DecodeSubSplatRef(subSplatRef, subSplatID, subSplatLevel);
 
-    uint splatID;
-    SubSplatData subSplat;
-    if (subSplatLevel == 0) {
-        splatID = subSplatID;
-        subSplat = GetSubSplatFromSplat(splatID, LoadSplatData(splatID));
-    } else {
-        subSplat = _SubSplats[subSplatID];
-        splatID = GetSubSplatRootSplatID(subSplatID);
-    }
+    SubSplatData subSplat = _SubSplats[subSplatID];
+    uint splatID = GetSubSplatRootSplatID(subSplatID);
     
-    uint chSubSplatID = AllocSubSplat();
-    if (chSubSplatID == -1)
-        return;
+    uint chSubSplatID = _SubSplatIDStack[e_subSplatSplitStackOfst + idx]; // Allocate Sub-Splat
     
     SubSplatData chSubSplat0, chSubSplat1;
     SplitSubSplat(subSplat, chSubSplat0, chSubSplat1);
@@ -315,7 +393,8 @@ void CSSplitSubSplats(uint3 threadID : SV_DispatchThreadID) {
     SetSubSplatRootSplatID(chSubSplatID, splatID);
     SetSubSplatParentRef(chSubSplatID, subSplatRef);
     uint chSubSplatRef = EncodeSubSplatRef(chSubSplatID, subSplatLevel + 1);
-    PushSubSplatRef(chSubSplatRef, 2);
+    _SubSplatDstRefs[e_subSplatSplitRefOfst + (idx << 1 | 0)] = chSubSplatRef | 0;
+    _SubSplatDstRefs[e_subSplatSplitRefOfst + (idx << 1 | 1)] = chSubSplatRef | 1;
 }
 
 [numthreads(GROUP_SIZE,1,1)]
@@ -328,26 +407,20 @@ void CSMergeSubSplats(uint3 threadID : SV_DispatchThreadID) {
     uint subSplatID, subSplatLevel;
     DecodeSubSplatRef(subSplatRef, subSplatID, subSplatLevel);
     
-    FreeSubSplat(subSplatID);
-    
-    if (subSplatLevel == 1)
-        return;
+    _SubSplatIDStack[e_subSplatMergeStackOfst + idx] = subSplatID; // Free Sub-Splat
     
     uint paSubSplatRef = GetSubSplatParentRef(subSplatID);
-    PushSubSplatRef(paSubSplatRef);
-    
-    uint paSubSplatID, _;
-    DecodeSubSplatRef(paSubSplatRef, paSubSplatID, _);
+    uint paSubSplatID, paSubSplatLevel;
+    DecodeSubSplatRef(paSubSplatRef, paSubSplatID, paSubSplatLevel);
+    // if (paSubSplatLevel == 0)
+    //     return;
+
+    _SubSplatDstRefs[e_subSplatMergeRefOfst + idx] = paSubSplatRef;
 
     SubSplatData paSubSplat = _SubSplats[paSubSplatID];
     if (MergeSubSplat(_SubSplats[subSplatID | 0], _SubSplats[subSplatID | 1], paSubSplat)) {
         _SubSplats[paSubSplatID] = paSubSplat;
     }
-}
-
-[numthreads(1,1,1)]
-void CSFixSubSplatAlloc () {
-    FixSubSplatAllocator();
 }
 
 RWStructuredBuffer<uint> _ViewSplatCount;

@@ -5,8 +5,10 @@
 
 #define LOG_MAX_SUB_SPLAT_COUNT 18     // kLogMaxSubSplatCount
 #define LOG_MAX_SUB_SPLAT_REF_COUNT 18 // kLogMaxSubSplatRefCount
+#define LOG_MAX_SUB_SPLAT_INIT_COUNT 17 // kLogMaxSubSplatInitCount
 #define MAX_SUB_SPLAT_COUNT (1 << LOG_MAX_SUB_SPLAT_COUNT)
 #define MAX_SUB_SPLAT_REF_COUNT (1 << LOG_MAX_SUB_SPLAT_REF_COUNT)
+#define MAX_SUB_SPLAT_INIT_COUNT (1 << LOG_MAX_SUB_SPLAT_INIT_COUNT)
 #define MAX_SUB_SPLAT_LEVEL 6          // at most (1 << MAX_SUB_SPLAT_LEVEL) Sub-Splats can be splitted from a Splat
 
 #if LOG_MAX_SUB_SPLAT_COUNT > 24
