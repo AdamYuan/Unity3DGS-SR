@@ -73,7 +73,7 @@ bool MergeSubSplat(in const SubSplatData subSplat0, in const SubSplatData subSpl
 }
 
 uint CalcSplatLevel(
-    in const SplatData splat, 
+    uint splatID, in const SplatData splat, 
     float3 centerWorldPos, float3 centerViewPos, float3 centerClipPos,
     float3x3 rotScaleMat, 
     float3 cov3d0, float3 cov3d1,

@@ -462,7 +462,7 @@ bool LoadSplatContext(uint idx, bool loadSubSplat, out SplatContext o_ctx) {
     return true;
 }
 
-void CalcViewData(in const SplatData splat, bool discardSplat, out uint o_splatLevel) {
+void CalcViewData(uint splatID, in const SplatData splat, bool discardSplat, out uint o_splatLevel) {
     o_splatLevel = 0;
     
     float3 centerWorldPos = mul(_MatrixObjectToWorld, float4(splat.pos, 1)).xyz;
@@ -512,7 +512,7 @@ void CalcViewData(in const SplatData splat, bool discardSplat, out uint o_splatL
     view.axis.y = f32tof16(axis2.x) | (f32tof16(axis2.y) << 16);
     
     o_splatLevel = CalcSplatLevel(
-        splat, 
+        splatID, splat, 
         centerWorldPos, centerViewPos, centerClipPos, 
         splatRotScaleMat,
         cov3d0, cov3d1,
@@ -538,7 +538,7 @@ void CSCalcViewData (uint3 id : SV_DispatchThreadID)
     SplatContext ctx;
     if (LoadSplatContext(id, false, ctx)) {
         uint splatLevel;
-        CalcViewData(ctx.splat, ctx.discardSplat, splatLevel);
+        CalcViewData(ctx.splatID, ctx.splat, ctx.discardSplat, splatLevel);
         UpdateSplatLevel(ctx.splatID, ctx.prevSplatLevel, splatLevel);
     }
 }
@@ -549,7 +549,7 @@ void CSCalcSubViewData (uint3 id : SV_DispatchThreadID)
     SplatContext ctx;
     if (LoadSplatContext(id, true, ctx)) {
         uint splatLevel;
-        CalcViewData(ctx.splat, ctx.discardSplat, splatLevel);
+        CalcViewData(ctx.splatID, ctx.splat, ctx.discardSplat, splatLevel);
         UpdateSubSplatLevel(ctx.splatID, ctx.prevSplatLevel, ctx.subSplatRef);
     }
 }
