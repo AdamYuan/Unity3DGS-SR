@@ -108,6 +108,19 @@ void MergeUnpackedSubSplat(
     // TODO: Implement this if needed, and remember to set SUB_SPLAT_MERGE to 1
 }
 
+__PUBLIC__ uint CalcSplatLevel(
+    uint splatID, in const SplatData splat, 
+    float3 centerWorldPos, float3 centerViewPos, float3 centerClipPos,
+    float3x3 rotScaleMat, 
+    float3 cov3d0, float3 cov3d1,
+    float3 cov2d,
+    float2 screenWH
+) {
+    // TODO: Implement your splitting level behavior
+    float d = max(0, -centerViewPos.z);
+    return uint(1.0 / d);
+}
+
 __PUBLIC__ SplatData GetSplatFromSubSplat(in const SubSplatData subSplat) {
     UnpackedSubSplatData unpackedSubSplat = UnpackSubSplatData(subSplat);
     SplatData ret;
@@ -144,17 +157,5 @@ __PUBLIC__ void SplitSubSplat(in const SubSplatData parentSubSplat, out SubSplat
         io_parentSubSplat = PackSubSplatData(unpackedParentSubSplat);
     }
 #endif
-
-__PUBLIC__ uint CalcSplatLevel(
-    uint splatID, in const SplatData splat, 
-    float3 centerWorldPos, float3 centerViewPos, float3 centerClipPos,
-    float3x3 rotScaleMat, 
-    float3 cov3d0, float3 cov3d1,
-    float3 cov2d,
-    float2 screenWH
-) {
-    float d = max(0, -centerViewPos.z);
-    return uint(1.0 / d);
-}
 
 #endif
