@@ -111,6 +111,9 @@ namespace GaussianSplatting.Editor
             EditorGUILayout.PropertyField(m_PropOpacityScale);
             EditorGUILayout.PropertyField(m_PropSHOrder);
             EditorGUILayout.PropertyField(m_PropSHOnly);
+
+            EditorGUILayout.Space();
+            GUILayout.Label("Sub-Splat Options", EditorStyles.boldLabel);
             EditorGUILayout.PropertyField(m_PropEnableSubSplats);
             if (m_PropEnableSubSplats.boolValue) {
                 EditorGUILayout.PropertyField(m_PropLockSubSplats);
