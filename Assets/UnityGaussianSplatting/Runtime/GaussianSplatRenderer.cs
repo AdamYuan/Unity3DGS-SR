@@ -810,11 +810,12 @@ namespace GaussianSplatting.Runtime
             cmb.SetComputeIntParam(m_CSSplatUtilities, Props.SHOrder, m_SHOrder);
             cmb.SetComputeIntParam(m_CSSplatUtilities, Props.SHOnly, m_SHOnly ? 1 : 0);
 
-            var subSplatCountData = new uint[1];
+            // Debug 
+            /* var subSplatCountData = new uint[1];
             var subSplatRefCountData = new uint[16];
             m_GpuSubSplatCount.GetData(subSplatCountData);
             m_GpuSubSplatRefCountConst.GetData(subSplatRefCountData);
-            Debug.Log("cnt:" + subSplatCountData[0] * 2 + "; refCnt:" + subSplatRefCountData[0] + "; sRefCnt:" + subSplatRefCountData[1] + "; mRefCnt:" + subSplatRefCountData[2]);
+            Debug.Log("cnt:" + subSplatCountData[0] * 2 + "; refCnt:" + subSplatRefCountData[0] + "; sRefCnt:" + subSplatRefCountData[1] + "; mRefCnt:" + subSplatRefCountData[2]); */
 
             // Reset View Counters
             cmb.SetBufferData(m_GpuViewSplatCount, new uint[1]);
