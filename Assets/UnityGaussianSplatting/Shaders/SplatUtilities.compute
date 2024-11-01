@@ -147,6 +147,8 @@ bool IsSplatCut(float3 pos)
     return finalCut;
 }
 
+uint _SubSplatEnabled;
+
 RWStructuredBuffer<uint> _SubSplatIDStack; // [MAX_SUB_SPLAT_COUNT / 2], initialized as (0, 2, 4, ..., MAX_SUB_SPLAT_COUNT - 2)
 RWStructuredBuffer<uint> _SubSplatCount;
 RWStructuredBuffer<uint> _SubSplatParents; // [MAX_SUB_SPLAT_COUNT / 2]
@@ -269,6 +271,9 @@ void PushSubSplatInitID(uint splatID) {
 RWStructuredBuffer<uint> _SubSplatLevels; // [_SplatCount], maintaining level of each splat, initialized as all zero
 
 void UpdateSplatLevel(uint splatID, uint prevSplatLevel, uint splatLevel) {
+    if (_SubSplatEnabled == 0)
+        return;
+
     splatLevel = min(splatLevel, MAX_SUB_SPLAT_LEVEL);
     if (splatLevel != prevSplatLevel) {
         if (prevSplatLevel == 0 && splatLevel > 0)
@@ -471,7 +476,11 @@ bool LoadSplatContext(uint idx, bool loadSubSplat, out SplatContext o_ctx) {
         ctx.splatID = idx;
         ctx.splat = LoadSplatData(idx);
     }
-    ctx.prevSplatLevel = _SubSplatLevels[ctx.splatID];
+    if (_SubSplatEnabled)
+        ctx.prevSplatLevel = _SubSplatLevels[ctx.splatID];
+    else
+        ctx.prevSplatLevel = 0;
+
     if (loadSubSplat)
         ctx.discardSplat = false;
     else
