@@ -148,8 +148,7 @@ namespace GaussianSplatting.Runtime
                 cmb.EndSample(s_ProfCalcView);
 
                 // sort
-                if (gs.m_FrameCounter % gs.m_SortNthFrame == 0)
-                    gs.SortPoints(cmb, cam, matrix);
+                gs.SortPoints(cmb, cam, matrix);
                 ++gs.m_FrameCounter;
 
                 // draw
@@ -281,9 +280,6 @@ namespace GaussianSplatting.Runtime
         public int m_SHOrder = 3;
         [Tooltip("Show only Spherical Harmonics contribution, using gray color")]
         public bool m_SHOnly;
-        [Range(1, 30)]
-        [Tooltip("Sort splats only every N frames, available in Quad SplatRenderMode")]
-        public int m_SortNthFrame = 1;
         
         public bool m_EnableSplitting = true;
 
