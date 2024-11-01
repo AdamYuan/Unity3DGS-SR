@@ -25,7 +25,9 @@ namespace GaussianSplatting.Editor
         SerializedProperty m_PropOpacityScale;
         SerializedProperty m_PropSHOrder;
         SerializedProperty m_PropSHOnly;
-        SerializedProperty m_PropEnableSplitting;
+        SerializedProperty m_PropEnableSubSplats;
+        SerializedProperty m_PropLockSubSplats;
+        SerializedProperty m_PropStepSubSplats;
         SerializedProperty m_PropRenderMode;
         SerializedProperty m_PropPointDisplaySize;
         SerializedProperty m_PropCutouts;
@@ -64,7 +66,9 @@ namespace GaussianSplatting.Editor
             m_PropOpacityScale = serializedObject.FindProperty("m_OpacityScale");
             m_PropSHOrder = serializedObject.FindProperty("m_SHOrder");
             m_PropSHOnly = serializedObject.FindProperty("m_SHOnly");
-            m_PropEnableSplitting = serializedObject.FindProperty("m_EnableSplitting");
+            m_PropEnableSubSplats = serializedObject.FindProperty("m_EnableSubSplats");
+            m_PropLockSubSplats = serializedObject.FindProperty("m_LockSubSplats");
+            m_PropStepSubSplats = serializedObject.FindProperty("m_StepSubSplats");
             m_PropRenderMode = serializedObject.FindProperty("m_RenderMode");
             m_PropPointDisplaySize = serializedObject.FindProperty("m_PointDisplaySize");
             m_PropCutouts = serializedObject.FindProperty("m_Cutouts");
@@ -107,7 +111,16 @@ namespace GaussianSplatting.Editor
             EditorGUILayout.PropertyField(m_PropOpacityScale);
             EditorGUILayout.PropertyField(m_PropSHOrder);
             EditorGUILayout.PropertyField(m_PropSHOnly);
-            EditorGUILayout.PropertyField(m_PropEnableSplitting);
+            EditorGUILayout.PropertyField(m_PropEnableSubSplats);
+            if (m_PropEnableSubSplats.boolValue) {
+                EditorGUILayout.PropertyField(m_PropLockSubSplats);
+                
+                if (m_PropLockSubSplats.boolValue) 
+                {
+                    if (GUILayout.Button("Step Sub-Splats")) 
+                        m_PropStepSubSplats.boolValue = true;
+                }
+            }
 
             EditorGUILayout.Space();
             GUILayout.Label("Debugging Tweaks", EditorStyles.boldLabel);

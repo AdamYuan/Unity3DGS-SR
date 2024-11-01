@@ -148,6 +148,8 @@ bool IsSplatCut(float3 pos)
     return finalCut;
 }
 
+uint _SubSplatLocked;
+
 RWStructuredBuffer<uint> _SubSplatIDStack; // [MAX_SUB_SPLAT_COUNT / 2], initialized as (0, 2, 4, ..., MAX_SUB_SPLAT_COUNT - 2)
 RWStructuredBuffer<uint> _SubSplatCount;
 RWStructuredBuffer<uint> _SubSplatParents; // [MAX_SUB_SPLAT_COUNT / 2]
@@ -270,6 +272,9 @@ void PushSubSplatInitID(uint splatID) {
 RWStructuredBuffer<uint> _SubSplatLevels; // [_SplatCount], maintaining level of each splat, initialized as all zero
 
 void UpdateSplatLevel(uint splatID, uint prevSplatLevel, uint splatLevel) {
+    if (_SubSplatLocked)
+        return;
+        
     splatLevel = min(splatLevel, MAX_SUB_SPLAT_LEVEL);
     if (splatLevel != prevSplatLevel) {
         if (prevSplatLevel == 0 && splatLevel > 0)
@@ -280,6 +285,9 @@ void UpdateSplatLevel(uint splatID, uint prevSplatLevel, uint splatLevel) {
 
 // prevSplatLevel \in [1, MAX_SUB_SPLAT_LEVEL] is guarenteed
 void UpdateSubSplatLevel(uint splatID, uint prevSplatLevel, uint subSplatRef) {
+    if (_SubSplatLocked)
+        return;
+
     uint subSplatID, subSplatLevel;
     DecodeSubSplatRef(subSplatRef, subSplatID, subSplatLevel);
     

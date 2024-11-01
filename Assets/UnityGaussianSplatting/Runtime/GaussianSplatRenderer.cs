@@ -281,7 +281,9 @@ namespace GaussianSplatting.Runtime
         [Tooltip("Show only Spherical Harmonics contribution, using gray color")]
         public bool m_SHOnly;
         
-        public bool m_EnableSplitting = true;
+        public bool m_EnableSubSplats = true;
+        public bool m_LockSubSplats = false;
+        public bool m_StepSubSplats = false;
 
         public RenderMode m_RenderMode = RenderMode.Splats;
         [Range(1.0f, 15.0f)] public float m_PointDisplaySize = 3.0f;
@@ -406,6 +408,7 @@ namespace GaussianSplatting.Runtime
             public static readonly int RenderTarget = Shader.PropertyToID("_RenderTarget");
             
             // BEGIN Props for Splat Splitting
+            public static readonly int SubSplatLocked = Shader.PropertyToID("_SubSplatLocked");
             public static readonly int SubSplatIDStack = Shader.PropertyToID("_SubSplatIDStack");
             public static readonly int SubSplatCount = Shader.PropertyToID("_SubSplatCount");
             public static readonly int SubSplatParents = Shader.PropertyToID("_SubSplatParents");
@@ -819,11 +822,12 @@ namespace GaussianSplatting.Runtime
             // Reset View Counters
             cmb.SetBufferData(m_GpuViewSplatCount, new uint[1]);
             
-            if (m_EnableSplitting) 
+            if (m_EnableSubSplats) 
             {
-                m_SubSplatRefFlip = !m_SubSplatRefFlip;
-                // Reset Sub-Splat Ref Counters
-                cmb.SetBufferData(m_GpuSubSplatRefCount, new uint[11]);
+                bool notLocked = !m_LockSubSplats || m_StepSubSplats;
+                m_StepSubSplats = false;
+
+                cmb.SetComputeIntParam(m_CSSplatUtilities, Props.SubSplatLocked, notLocked ? 0 : 1);
 
                 // CalcRootViewData
                 SetAssetDataOnCS(cmb, KernelIndices.CalcRootViewData);
@@ -842,27 +846,31 @@ namespace GaussianSplatting.Runtime
                 cmb.SetComputeBufferParam(m_CSSplatUtilities, (int)KernelIndices.CalcSubViewData, Props.ViewSplatCount, m_GpuViewSplatCount);
                 cmb.DispatchCompute(m_CSSplatUtilities, (int)KernelIndices.CalcSubViewData, m_GpuSubSplatRefIndirect, 0);
                 
-                // BEGIN Sub-Splat Modify
-                
-                // InitSubSplatIndirect
-                SetSubSplatDataOnCS(cmb, KernelIndices.InitSubSplatIndirect);
-                cmb.DispatchCompute(m_CSSplatUtilities, (int)KernelIndices.InitSubSplatIndirect, 1, 1, 1);
-                cmb.CopyBuffer(m_GpuSubSplatRefCount, m_GpuSubSplatRefCountConst);
-             
-                // MergeSubSplats
-                SetSubSplatDataOnCS(cmb, KernelIndices.MergeSubSplats);
-                cmb.DispatchCompute(m_CSSplatUtilities, (int)KernelIndices.MergeSubSplats, m_GpuSubSplatRefIndirect, 6 * sizeof(uint));
-             
-                // InitSubSplats
-                SetAssetDataOnCS(cmb, KernelIndices.InitSubSplats);
-                SetSubSplatDataOnCS(cmb, KernelIndices.InitSubSplats);
-                cmb.DispatchCompute(m_CSSplatUtilities, (int)KernelIndices.InitSubSplats, m_GpuSubSplatRefIndirect, 9 * sizeof(uint));
-                
-                // SplitSubSplats
-                SetSubSplatDataOnCS(cmb, KernelIndices.SplitSubSplats);
-                cmb.DispatchCompute(m_CSSplatUtilities, (int)KernelIndices.SplitSubSplats, m_GpuSubSplatRefIndirect, 3 * sizeof(uint));
-                
-                // END Sub-Splat Modify
+                if (notLocked) 
+                {
+                    // InitSubSplatIndirect
+                    SetSubSplatDataOnCS(cmb, KernelIndices.InitSubSplatIndirect);
+                    cmb.DispatchCompute(m_CSSplatUtilities, (int)KernelIndices.InitSubSplatIndirect, 1, 1, 1);
+                    cmb.CopyBuffer(m_GpuSubSplatRefCount, m_GpuSubSplatRefCountConst);
+
+                    // Reset Sub-Splat Ref Counters
+                    cmb.SetBufferData(m_GpuSubSplatRefCount, new uint[11]);
+                 
+                    // MergeSubSplats
+                    SetSubSplatDataOnCS(cmb, KernelIndices.MergeSubSplats);
+                    cmb.DispatchCompute(m_CSSplatUtilities, (int)KernelIndices.MergeSubSplats, m_GpuSubSplatRefIndirect, 6 * sizeof(uint));
+                 
+                    // InitSubSplats
+                    SetAssetDataOnCS(cmb, KernelIndices.InitSubSplats);
+                    SetSubSplatDataOnCS(cmb, KernelIndices.InitSubSplats);
+                    cmb.DispatchCompute(m_CSSplatUtilities, (int)KernelIndices.InitSubSplats, m_GpuSubSplatRefIndirect, 9 * sizeof(uint));
+                    
+                    // SplitSubSplats
+                    SetSubSplatDataOnCS(cmb, KernelIndices.SplitSubSplats);
+                    cmb.DispatchCompute(m_CSSplatUtilities, (int)KernelIndices.SplitSubSplats, m_GpuSubSplatRefIndirect, 3 * sizeof(uint));
+
+                    m_SubSplatRefFlip = !m_SubSplatRefFlip;
+                }
             } 
             else 
             {
