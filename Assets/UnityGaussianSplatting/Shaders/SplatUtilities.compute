@@ -284,8 +284,10 @@ void UpdateSubSplatLevel(uint splatID, uint prevSplatLevel, uint subSplatRef) {
     
     bool split = subSplatLevel < prevSplatLevel, merge = subSplatLevel > prevSplatLevel;
     
+    uint pushSubSplatRef = 0; // A valid subSplatRef will not be 0 since its subSplatLevel >= 1
+    
     if (subSplatLevel == prevSplatLevel)
-        PushSubSplatRef(subSplatRef);
+        pushSubSplatRef = subSplatRef;
     else if (subSplatLevel < prevSplatLevel)
         PushSubSplatSplitRef(subSplatRef);
     else if ((subSplatRef & 1) == 0) {
@@ -298,10 +300,13 @@ void UpdateSubSplatLevel(uint splatID, uint prevSplatLevel, uint subSplatRef) {
             FreeSubSplat(subSplatID);
             if (subSplatLevel > 1) {
                 uint paSubSplatRef = GetSubSplatParentRef(subSplatID);
-                PushSubSplatRef(paSubSplatRef);
+                pushSubSplatRef = paSubSplatRef;
             }
         #endif
     }
+    
+    if (pushSubSplatRef != 0)
+        PushSubSplatRef(pushSubSplatRef);
 }
 
 [numthreads(1,1,1)]
