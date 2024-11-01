@@ -576,14 +576,14 @@ namespace GaussianSplatting.Runtime
             m_GpuSubSplatInitIDs = new GraphicsBuffer(GraphicsBuffer.Target.Structured, kMaxSubSplatInitCount, sizeof(uint));
             m_GpuSubSplatRefCount = new GraphicsBuffer(
                 GraphicsBuffer.Target.Structured | GraphicsBuffer.Target.CopySource, 
-                16, sizeof(uint)
+                11, sizeof(uint)
             );
-            m_GpuSubSplatRefCount.SetData(new uint[16]);
+            m_GpuSubSplatRefCount.SetData(new uint[11]);
             m_GpuSubSplatRefCountConst = new GraphicsBuffer(
                 GraphicsBuffer.Target.Structured | GraphicsBuffer.Target.CopyDestination | GraphicsBuffer.Target.Constant, 
-                16, sizeof(uint)
+                11, sizeof(uint)
             );
-            m_GpuSubSplatRefCountConst.SetData(new uint[16]);
+            m_GpuSubSplatRefCountConst.SetData(new uint[11]);
             m_GpuSubSplatRefIndirect = new GraphicsBuffer(
                 GraphicsBuffer.Target.Structured | GraphicsBuffer.Target.IndirectArguments, 
                 12, sizeof(uint)
@@ -698,7 +698,7 @@ namespace GaussianSplatting.Runtime
             cmb.SetComputeBufferParam(cs, kernelIndex, Props.SubSplatSplitRefs, m_GpuSubSplatSplitRefs);
             cmb.SetComputeBufferParam(cs, kernelIndex, Props.SubSplatMergeRefs, m_GpuSubSplatMergeRefs);
             cmb.SetComputeBufferParam(cs, kernelIndex, Props.SubSplatInitIDs, m_GpuSubSplatInitIDs);
-            cmb.SetComputeConstantBufferParam(cs, Props.CBSubSplatRefCount, m_GpuSubSplatRefCountConst, 0, 16 * sizeof(uint));
+            cmb.SetComputeConstantBufferParam(cs, Props.CBSubSplatRefCount, m_GpuSubSplatRefCountConst, 0, 11 * sizeof(uint));
             cmb.SetComputeBufferParam(cs, kernelIndex, Props.SubSplatRefCount, m_GpuSubSplatRefCount);
             cmb.SetComputeBufferParam(cs, kernelIndex, Props.SubSplatRefIndirect, m_GpuSubSplatRefIndirect);
             cmb.SetComputeBufferParam(cs, kernelIndex, Props.SubSplatLevels, m_GpuSubSplatLevels);
@@ -811,11 +811,13 @@ namespace GaussianSplatting.Runtime
             cmb.SetComputeIntParam(m_CSSplatUtilities, Props.SHOnly, m_SHOnly ? 1 : 0);
 
             // Debug 
-            /* var subSplatCountData = new uint[1];
-            var subSplatRefCountData = new uint[16];
+            /*
+            var subSplatCountData = new uint[1];
+            var subSplatRefCountData = new uint[11];
             m_GpuSubSplatCount.GetData(subSplatCountData);
             m_GpuSubSplatRefCountConst.GetData(subSplatRefCountData);
-            Debug.Log("cnt:" + subSplatCountData[0] * 2 + "; refCnt:" + subSplatRefCountData[0] + "; sRefCnt:" + subSplatRefCountData[1] + "; mRefCnt:" + subSplatRefCountData[2]); */
+            Debug.Log("cnt:" + subSplatCountData[0] * 2 + "; refCnt:" + subSplatRefCountData[0] + "; sRefCnt:" + subSplatRefCountData[1] + "; mRefCnt:" + subSplatRefCountData[2]);
+            */
 
             // Reset View Counters
             cmb.SetBufferData(m_GpuViewSplatCount, new uint[1]);
@@ -836,7 +838,7 @@ namespace GaussianSplatting.Runtime
             SetSubSplatDataOnCS(cmb, KernelIndices.InitSubSplatIndirect);
             cmb.DispatchCompute(m_CSSplatUtilities, (int)KernelIndices.InitSubSplatIndirect, 1, 1, 1);
             cmb.CopyBuffer(m_GpuSubSplatRefCount, m_GpuSubSplatRefCountConst);
-            cmb.SetBufferData(m_GpuSubSplatRefCount, new uint[16]);
+            cmb.SetBufferData(m_GpuSubSplatRefCount, new uint[11]);
 
             // MergeSubSplats
             SetSubSplatDataOnCS(cmb, KernelIndices.MergeSubSplats);

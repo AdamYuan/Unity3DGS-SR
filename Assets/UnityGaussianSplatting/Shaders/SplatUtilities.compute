@@ -289,10 +289,18 @@ void UpdateSubSplatLevel(uint splatID, uint prevSplatLevel, uint subSplatRef) {
     else if (subSplatLevel < prevSplatLevel)
         PushSubSplatSplitRef(subSplatRef);
     else if ((subSplatRef & 1) == 0) {
-        if (subSplatLevel > 1)
-            PushSubSplatMergeRef(subSplatRef);
-        else
+        #if SUB_SPLAT_MERGE == 1
+            if (subSplatLevel > 1)
+                PushSubSplatMergeRef(subSplatRef);
+            else
+                FreeSubSplat(subSplatID);
+        #else
             FreeSubSplat(subSplatID);
+            if (subSplatLevel > 1) {
+                uint paSubSplatRef = GetSubSplatParentRef(subSplatID);
+                PushSubSplatRef(paSubSplatRef);
+            }
+        #endif
     }
 }
 
@@ -303,6 +311,10 @@ void CSInitSubSplatIndirect () {
     // Call order: Merge -> Init -> Split
     uint stackOfst = _SubSplatCount[0];
     uint refOfst = count.refCount;
+
+    #if SUB_SPLAT_MERGE == 0
+        count.mergeRefCount = 0;
+    #endif
 
     // Merge
     stackOfst -= count.mergeRefCount;
@@ -372,7 +384,7 @@ void CSSplitSubSplats(uint3 threadID : SV_DispatchThreadID) {
     
     uint subSplatRef = _SubSplatSplitRefs[idx];
     
-    if (e_subSplatSplitDisabled) {
+    if (e_subSplatSplitDisabled == 1) {
         _SubSplatDstRefs[e_subSplatSplitRefOfst + idx] = subSplatRef;
         return;
     }
@@ -399,28 +411,29 @@ void CSSplitSubSplats(uint3 threadID : SV_DispatchThreadID) {
 
 [numthreads(GROUP_SIZE,1,1)]
 void CSMergeSubSplats(uint3 threadID : SV_DispatchThreadID) {
-    uint idx = threadID.x;
-    if (idx >= e_subSplatMergeRefCount)
-        return;
+    #if SUB_SPLAT_MERGE == 1
+        uint idx = threadID.x;
+        if (idx >= e_subSplatMergeRefCount)
+            return;
 
-    uint subSplatRef = _SubSplatMergeRefs[idx];
-    uint subSplatID, subSplatLevel;
-    DecodeSubSplatRef(subSplatRef, subSplatID, subSplatLevel);
+        uint subSplatRef = _SubSplatMergeRefs[idx];
+        uint subSplatID, subSplatLevel;
+        DecodeSubSplatRef(subSplatRef, subSplatID, subSplatLevel);
     
-    _SubSplatIDStack[e_subSplatMergeStackOfst + idx] = subSplatID; // Free Sub-Splat
+        _SubSplatIDStack[e_subSplatMergeStackOfst + idx] = subSplatID; // Free Sub-Splat
     
-    uint paSubSplatRef = GetSubSplatParentRef(subSplatID);
-    uint paSubSplatID, paSubSplatLevel;
-    DecodeSubSplatRef(paSubSplatRef, paSubSplatID, paSubSplatLevel);
-    // if (paSubSplatLevel == 0)
-    //     return;
+        uint paSubSplatRef = GetSubSplatParentRef(subSplatID);
+        uint paSubSplatID, paSubSplatLevel;
+        DecodeSubSplatRef(paSubSplatRef, paSubSplatID, paSubSplatLevel);
+        // if (paSubSplatLevel == 0)
+        //     return;
 
-    _SubSplatDstRefs[e_subSplatMergeRefOfst + idx] = paSubSplatRef;
+        _SubSplatDstRefs[e_subSplatMergeRefOfst + idx] = paSubSplatRef;
 
-    SubSplatData paSubSplat = _SubSplats[paSubSplatID];
-    if (MergeSubSplat(_SubSplats[subSplatID | 0], _SubSplats[subSplatID | 1], paSubSplat)) {
+        SubSplatData paSubSplat = _SubSplats[paSubSplatID];
+        MergeSubSplat(_SubSplats[subSplatID | 0], _SubSplats[subSplatID | 1], paSubSplat);
         _SubSplats[paSubSplatID] = paSubSplat;
-    }
+    #endif
 }
 
 RWStructuredBuffer<uint> _ViewSplatCount;

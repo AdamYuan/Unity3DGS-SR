@@ -3,6 +3,9 @@
 
 #include "GaussianSplatting.hlsl"
 
+#pragma Native16Bit
+
+#define SUB_SPLAT_MERGE 0               // Disable explicit merge by default
 #define MAX_SUB_SPLAT_LEVEL 4           // at most (1 << MAX_SUB_SPLAT_LEVEL) Sub-Splats can be splitted from a Splat
 #define LOG_MAX_SUB_SPLAT_COUNT 18      // kLogMaxSubSplatCount
 #define LOG_MAX_SUB_SPLAT_REF_COUNT 18  // kLogMaxSubSplatRefCount
@@ -66,11 +69,11 @@ void SplitSubSplat(in const SubSplatData parentSubSplat, out SubSplatData o_subS
     o_subSplat1 = parentSubSplat;
 }
 
-bool MergeSubSplat(in const SubSplatData subSplat0, in const SubSplatData subSplat1, inout SubSplatData io_parentSubSplat) {
-    return false;
-    // Default is remaining the parent sub-splat
-    // TODO: Implement this if needed, and remember to return true if something changed
-}
+#if SUB_SPLAT_MERGE == 1
+    void MergeSubSplat(in const SubSplatData subSplat0, in const SubSplatData subSplat1, inout SubSplatData io_parentSubSplat) {
+        // TODO: Implement this if needed, and remember to set SUB_SPLAT_MERGE to 1
+    }
+#endif
 
 uint CalcSplatLevel(
     uint splatID, in const SplatData splat, 
