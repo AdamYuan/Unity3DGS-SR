@@ -402,7 +402,7 @@ void CSSplitSubSplats(uint3 threadID : SV_DispatchThreadID) {
     uint chSubSplatID = _SubSplatIDStack[e_subSplatSplitStackOfst + idx]; // Allocate Sub-Splat
     
     SubSplatData chSubSplat0, chSubSplat1;
-    SplitSubSplat(subSplat, chSubSplat0, chSubSplat1);
+    SplitSubSplat(subSplatLevel, subSplat, chSubSplat0, chSubSplat1);
     _SubSplats[chSubSplatID | 0] = chSubSplat0;
     _SubSplats[chSubSplatID | 1] = chSubSplat1;
 
@@ -433,7 +433,7 @@ void CSMergeSubSplats(uint3 threadID : SV_DispatchThreadID) {
         _SubSplatDstRefs[e_subSplatMergeRefOfst + idx] = paSubSplatRef;
 
         SubSplatData paSubSplat = _SubSplats[paSubSplatID];
-        MergeSubSplat(_SubSplats[subSplatID | 0], _SubSplats[subSplatID | 1], paSubSplat);
+        MergeSubSplat(_SubSplats[subSplatID | 0], _SubSplats[subSplatID | 1], paSubSplatLevel, paSubSplat);
         _SubSplats[paSubSplatID] = paSubSplat;
     #endif
 }

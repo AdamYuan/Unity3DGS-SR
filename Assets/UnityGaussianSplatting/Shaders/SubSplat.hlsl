@@ -84,6 +84,7 @@ SubSplatData PackSubSplatData(in const UnpackedSubSplatData subSplat) {
 }
 
 void SplitUnpackedSubSplat(
+    uint parentLevel,
     in const UnpackedSubSplatData parentSubSplat, 
     out UnpackedSubSplatData o_subSplat0, 
     out UnpackedSubSplatData o_subSplat1
@@ -103,6 +104,7 @@ void SplitUnpackedSubSplat(
 void MergeUnpackedSubSplat(
     in const UnpackedSubSplatData subSplat0, 
     in const UnpackedSubSplatData subSplat1, 
+    uint parentLevel,
     inout UnpackedSubSplatData io_parentSubSplat
 ) {
     // TODO: Implement this if needed, and remember to set SUB_SPLAT_MERGE to 1
@@ -135,25 +137,25 @@ __PUBLIC__ SplatData GetSplatFromSubSplat(in const SubSplatData subSplat) {
 __PUBLIC__ void InitSubSplat(uint rootSplatID, in const SplatData rootSplat, out SubSplatData o_subSplat0, out SubSplatData o_subSplat1) {
     UnpackedSubSplatData unpackedRootSubSplat = GetUnpackedSubSplatFromSplat(rootSplatID, rootSplat);
     UnpackedSubSplatData unpackedSubSplat0, unpackedSubSplat1;
-    SplitUnpackedSubSplat(unpackedRootSubSplat, unpackedSubSplat0, unpackedSubSplat1);
+    SplitUnpackedSubSplat(0, unpackedRootSubSplat, unpackedSubSplat0, unpackedSubSplat1); // root is level 0
     o_subSplat0 = PackSubSplatData(unpackedSubSplat0);
     o_subSplat1 = PackSubSplatData(unpackedSubSplat1);
 }
 
-__PUBLIC__ void SplitSubSplat(in const SubSplatData parentSubSplat, out SubSplatData o_subSplat0, out SubSplatData o_subSplat1) {
+__PUBLIC__ void SplitSubSplat(uint parentLevel, in const SubSplatData parentSubSplat, out SubSplatData o_subSplat0, out SubSplatData o_subSplat1) {
     UnpackedSubSplatData unpackedParentSubSplat = UnpackSubSplatData(parentSubSplat);
     UnpackedSubSplatData unpackedSubSplat0, unpackedSubSplat1;
-    SplitUnpackedSubSplat(unpackedParentSubSplat, unpackedSubSplat0, unpackedSubSplat1);
+    SplitUnpackedSubSplat(parentLevel, unpackedParentSubSplat, unpackedSubSplat0, unpackedSubSplat1);
     o_subSplat0 = PackSubSplatData(unpackedSubSplat0);
     o_subSplat1 = PackSubSplatData(unpackedSubSplat1);
 }
 
 #if SUB_SPLAT_MERGE == 1
-    __PUBLIC__ void MergeSubSplat(in const SubSplatData subSplat0, in const SubSplatData subSplat1, inout SubSplatData io_parentSubSplat) {
+    __PUBLIC__ void MergeSubSplat(in const SubSplatData subSplat0, in const SubSplatData subSplat1, uint parentLevel, inout SubSplatData io_parentSubSplat) {
         UnpackedSubSplatData unpackedSubSplat0 = UnpackSubSplatData(subSplat0);
         UnpackedSubSplatData unpackedSubSplat1 = UnpackSubSplatData(subSplat1);
         UnpackedSubSplatData unpackedParentSubSplat = UnpackSubSplatData(io_parentSubSplat);
-        MergeUnpackedSubSplat(unpackedSubSplat0, unpackedSubSplat1, unpackedParentSubSplat);
+        MergeUnpackedSubSplat(unpackedSubSplat0, unpackedSubSplat1, parentLevel, unpackedParentSubSplat);
         io_parentSubSplat = PackSubSplatData(unpackedParentSubSplat);
     }
 #endif
