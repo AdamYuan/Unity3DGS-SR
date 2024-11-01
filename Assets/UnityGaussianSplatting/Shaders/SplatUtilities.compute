@@ -367,12 +367,10 @@ void CSInitSubSplats(uint3 threadID : SV_DispatchThreadID) {
         return;
     
     uint splatID = _SubSplatInitIDs[idx];
-    SubSplatData subSplat = GetSubSplatFromSplat(splatID, LoadSplatData(splatID));
-    
     uint chSubSplatID = _SubSplatIDStack[e_subSplatInitStackOfst + idx]; // Allocate Sub-Splat
     
     SubSplatData chSubSplat0, chSubSplat1;
-    SplitSubSplat(subSplat, chSubSplat0, chSubSplat1);
+    InitSubSplat(splatID, LoadSplatData(splatID), chSubSplat0, chSubSplat1);
     _SubSplats[chSubSplatID | 0] = chSubSplat0;
     _SubSplats[chSubSplatID | 1] = chSubSplat1;
 
