@@ -25,7 +25,7 @@
 // Remember to change kGpuSubSplatDataSize in GaussianSplatRenderer.cs if you modify `struct SubSplatData`
 struct SubSplatData {
     float3 pos;
-    uint rootSplatID;
+    uint rootSplatID; // Inherit the SH from Root-Splat
     uint2 rotFP16x4;
     uint2 scaleOpacityFP16x4;
 };
@@ -62,7 +62,7 @@ SplatData GetSplatFromSubSplat(in const SubSplatData subSplat) {
 }
 
 void SplitSubSplat(in const SubSplatData parentSubSplat, out SubSplatData o_subSplat0, out SubSplatData o_subSplat1) {
-    // TODO:
+    // TODO: Implement your splitting behavior
     o_subSplat0 = parentSubSplat;
     o_subSplat1 = parentSubSplat;
 }
