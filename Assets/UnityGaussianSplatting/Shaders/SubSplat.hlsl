@@ -4,7 +4,7 @@
 #include "GaussianSplatting.hlsl"
 
 #define SUB_SPLAT_MERGE 0               // Disable explicit merge by default
-#define MAX_SUB_SPLAT_LEVEL 4           // at most (1 << MAX_SUB_SPLAT_LEVEL) Sub-Splats can be splitted from a Splat
+#define MAX_SUB_SPLAT_LEVEL 6           // at most (1 << MAX_SUB_SPLAT_LEVEL) Sub-Splats can be splitted from a Splat
 #define LOG_MAX_SUB_SPLAT_COUNT 18      // kLogMaxSubSplatCount
 #define LOG_MAX_SUB_SPLAT_REF_COUNT 18  // kLogMaxSubSplatRefCount
 #define LOG_MAX_SUB_SPLAT_INIT_COUNT 17 // kLogMaxSubSplatInitCount
@@ -157,5 +157,7 @@ __PUBLIC__ void SplitSubSplat(in const SubSplatData parentSubSplat, out SubSplat
         io_parentSubSplat = PackSubSplatData(unpackedParentSubSplat);
     }
 #endif
+
+#undef __PUBLIC__
 
 #endif
