@@ -5,18 +5,11 @@
 
 #define SUB_SPLAT_MERGE 0               // Disable explicit merge by default
 #define MAX_SUB_SPLAT_LEVEL 6           // at most (1 << MAX_SUB_SPLAT_LEVEL) Sub-Splats can be splitted from a Splat
-#define LOG_MAX_SUB_SPLAT_COUNT 18      // kLogMaxSubSplatCount
-#define LOG_MAX_SUB_SPLAT_REF_COUNT 18  // kLogMaxSubSplatRefCount
-#define LOG_MAX_SUB_SPLAT_INIT_COUNT 17 // kLogMaxSubSplatInitCount
+#define LOG_MAX_SUB_SPLAT_COUNT 19      // kLogMaxSubSplatCount
 #define MAX_SUB_SPLAT_COUNT (1 << LOG_MAX_SUB_SPLAT_COUNT)
-#define MAX_SUB_SPLAT_REF_COUNT (1 << LOG_MAX_SUB_SPLAT_REF_COUNT)
-#define MAX_SUB_SPLAT_INIT_COUNT (1 << LOG_MAX_SUB_SPLAT_INIT_COUNT)
 
 #if LOG_MAX_SUB_SPLAT_COUNT > 24
     #error LOG_MAX_SUB_SPLAT_COUNT too large
-#endif
-#if LOG_MAX_SUB_SPLAT_REF_COUNT < LOG_MAX_SUB_SPLAT_COUNT
-    #error LOG_MAX_SUB_SPLAT_REF_COUNT too small
 #endif
 #if MAX_SUB_SPLAT_LEVEL > 255
     #error MAX_SUB_SPLAT_LEVEL too large

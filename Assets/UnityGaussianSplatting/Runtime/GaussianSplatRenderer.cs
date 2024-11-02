@@ -260,12 +260,8 @@ namespace GaussianSplatting.Runtime
 
         // Constants For Splat splitting
         public const int kGpuSubSplatDataSize = 32; // Size of struct SubSplatData
-        public const int kLogMaxSubSplatCount = 18; // Don't change this
+        public const int kLogMaxSubSplatCount = 19; // Don't change this
         public const int kMaxSubSplatCount = 1 << kLogMaxSubSplatCount; // Don't change this
-        public const int kLogMaxSubSplatRefCount = 18; // Don't change this
-        public const int kMaxSubSplatRefCount = 1 << kLogMaxSubSplatRefCount; // Don't change this
-        public const int kLogMaxSubSplatInitCount = 17; // Don't change this
-        public const int kMaxSubSplatInitCount = 1 << kLogMaxSubSplatInitCount; // Don't change this
 
         public GaussianSplatAsset m_Asset;
 
@@ -571,11 +567,11 @@ namespace GaussianSplatting.Runtime
             m_GpuSubSplatRoots = new GraphicsBuffer(GraphicsBuffer.Target.Structured, kMaxSubSplatCount / 2, sizeof(uint));
             m_GpuSubSplats = new GraphicsBuffer(GraphicsBuffer.Target.Structured, kMaxSubSplatCount, kGpuSubSplatDataSize);
 
-            m_GpuSubSplatRefs0 = new GraphicsBuffer(GraphicsBuffer.Target.Structured, kMaxSubSplatRefCount, sizeof(uint));
-            m_GpuSubSplatRefs1 = new GraphicsBuffer(GraphicsBuffer.Target.Structured, kMaxSubSplatRefCount, sizeof(uint));
-            m_GpuSubSplatSplitRefs = new GraphicsBuffer(GraphicsBuffer.Target.Structured, kMaxSubSplatRefCount, sizeof(uint));
-            m_GpuSubSplatMergeRefs = new GraphicsBuffer(GraphicsBuffer.Target.Structured, kMaxSubSplatRefCount, sizeof(uint));
-            m_GpuSubSplatInitIDs = new GraphicsBuffer(GraphicsBuffer.Target.Structured, kMaxSubSplatInitCount, sizeof(uint));
+            m_GpuSubSplatRefs0 = new GraphicsBuffer(GraphicsBuffer.Target.Structured, kMaxSubSplatCount / 2, sizeof(uint));
+            m_GpuSubSplatRefs1 = new GraphicsBuffer(GraphicsBuffer.Target.Structured, kMaxSubSplatCount / 2, sizeof(uint));
+            m_GpuSubSplatSplitRefs = new GraphicsBuffer(GraphicsBuffer.Target.Structured, kMaxSubSplatCount / 2, sizeof(uint));
+            m_GpuSubSplatMergeRefs = new GraphicsBuffer(GraphicsBuffer.Target.Structured, kMaxSubSplatCount / 2, sizeof(uint));
+            m_GpuSubSplatInitIDs = new GraphicsBuffer(GraphicsBuffer.Target.Structured, kMaxSubSplatCount / 2, sizeof(uint));
             m_GpuSubSplatRefCount = new GraphicsBuffer(
                 GraphicsBuffer.Target.Structured | GraphicsBuffer.Target.CopySource, 
                 11, sizeof(uint)
