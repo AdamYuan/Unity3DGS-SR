@@ -5,7 +5,7 @@
 
 #define SUB_SPLAT_MERGE 0               // Disable explicit merge by default
 #define MAX_SUB_SPLAT_LEVEL 6           // at most (1 << MAX_SUB_SPLAT_LEVEL) Sub-Splats can be splitted from a Splat
-#define LOG_MAX_SUB_SPLAT_COUNT 19      // kLogMaxSubSplatCount
+#define LOG_MAX_SUB_SPLAT_COUNT 18      // kLogMaxSubSplatCount
 #define MAX_SUB_SPLAT_COUNT (1 << LOG_MAX_SUB_SPLAT_COUNT)
 
 #if LOG_MAX_SUB_SPLAT_COUNT > 24

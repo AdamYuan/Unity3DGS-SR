@@ -260,7 +260,7 @@ namespace GaussianSplatting.Runtime
 
         // Constants For Splat splitting
         public const int kGpuSubSplatDataSize = 32; // Size of struct SubSplatData
-        public const int kLogMaxSubSplatCount = 19; // Don't change this
+        public const int kLogMaxSubSplatCount = 18; // Don't change this
         public const int kMaxSubSplatCount = 1 << kLogMaxSubSplatCount; // Don't change this
 
         public GaussianSplatAsset m_Asset;
