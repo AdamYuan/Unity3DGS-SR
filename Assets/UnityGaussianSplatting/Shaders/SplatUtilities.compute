@@ -201,7 +201,6 @@ struct SubSplatRefCount {
     uint mergeStackOfst;
     uint initStackOfst;
     uint splitRefOfst;
-    uint mergeRefOfst;
     uint initRefOfst;
     uint splitDisabled;
 };
@@ -215,7 +214,6 @@ cbuffer cbSubSplatRefCount {
     uint e_subSplatMergeStackOfst;
     uint e_subSplatInitStackOfst;
     uint e_subSplatSplitRefOfst;
-    uint e_subSplatMergeRefOfst;
     uint e_subSplatInitRefOfst;
     uint e_subSplatSplitDisabled;
 };
@@ -304,19 +302,17 @@ void UpdateSubSplatLevel(uint splatID, uint prevSplatLevel, uint subSplatRef) {
     else if (subSplatLevel < prevSplatLevel)
         PushSubSplatSplitRef(subSplatRef);
     else {
-        #if SUB_SPLAT_MERGE == 1
-            if (subSplatLevel > 1)
-                PushSubSplatMergeRef(subSplatRef);
-            else
-                FreeSubSplat(subSplatID);
-        #else
+        #if SUB_SPLAT_MERGE == 0
             FreeSubSplat(subSplatID);
-            if (subSplatLevel > 1) {
-                uint paSubSplatRef = GetSubSplatParentRef(subSplatID);
-                if ((paSubSplatRef & 1) == 0)
-                    pushSubSplatRef = paSubSplatRef;
-            }
+        #else
+            PushSubSplatMergeRef(subSplatRef);
         #endif
+
+        if (subSplatLevel > 1) {
+            uint paSubSplatRef = GetSubSplatParentRef(subSplatID);
+            if ((paSubSplatRef & 1) == 0)
+                pushSubSplatRef = paSubSplatRef;
+        }
     }
     
     if (pushSubSplatRef != 0)
@@ -338,8 +334,6 @@ void CSInitSubSplatIndirect () {
     // Merge
     stackOfst -= count.mergeRefCount;
     count.mergeStackOfst = stackOfst;
-    count.mergeRefOfst = refOfst;
-    refOfst += count.mergeRefCount >> 1;
     
     // Init
     count.initStackOfst = stackOfst;
@@ -442,13 +436,14 @@ void CSMergeSubSplats(uint3 threadID : SV_DispatchThreadID) {
         DecodeSubSplatRef(subSplatRef, subSplatID, subSplatLevel);
     
         _SubSplatIDStack[e_subSplatMergeStackOfst + idx] = subSplatID; // Free Sub-Splat
-    
+        
+        if (subSplatLevel <= 1)
+            return;
+        
         uint paSubSplatRef = GetSubSplatParentRef(subSplatID);
         uint paSubSplatID, paSubSplatLevel;
+        // paSubSplatLevel == subSplatLevel - 1
         DecodeSubSplatRef(paSubSplatRef, paSubSplatID, paSubSplatLevel);
-
-        if ((paSubSplatRef & 1u) == 0)
-            _SubSplatDstRefs[e_subSplatMergeRefOfst + (idx >> 1)] = paSubSplatRef;
 
         SubSplatData paSubSplat = _SubSplats[paSubSplatID];
         uint splatID = GetSubSplatRootSplatID(paSubSplatID);
