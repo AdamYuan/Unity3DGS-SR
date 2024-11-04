@@ -11,7 +11,7 @@
 #if LOG_MAX_SUB_SPLAT_COUNT > 24
     #error LOG_MAX_SUB_SPLAT_COUNT too large
 #endif
-#if MAX_SUB_SPLAT_LEVEL > 255
+#if MAX_SUB_SPLAT_LEVEL > 15
     #error MAX_SUB_SPLAT_LEVEL too large
 #endif
 

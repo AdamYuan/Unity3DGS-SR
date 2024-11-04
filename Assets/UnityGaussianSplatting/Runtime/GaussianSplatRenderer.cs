@@ -588,8 +588,8 @@ namespace GaussianSplatting.Runtime
             );
             m_GpuSubSplatRefIndirect.SetData(new uint[12]{0, 1, 1, 0, 1, 1, 0, 1, 1, 0, 1, 1});
 
-            m_GpuSubSplatLevels = new GraphicsBuffer(GraphicsBuffer.Target.Structured, count, sizeof(uint));
-            m_GpuSubSplatLevels.SetData(new uint[count]);
+            m_GpuSubSplatLevels = new GraphicsBuffer(GraphicsBuffer.Target.Structured, (count + 7) / 8, sizeof(uint));
+            m_GpuSubSplatLevels.SetData(new uint[(count + 7) / 8]);
         }
 
         void InitSortBuffers(int count)

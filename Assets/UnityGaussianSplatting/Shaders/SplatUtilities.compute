@@ -150,6 +150,13 @@ bool IsSplatCut(float3 pos)
 
 uint _SubSplatLocked;
 
+uint GetWaveAdjustedIndex(uint3 groupID, uint groupIndex) {
+    uint laneCount = WaveGetLaneCount();
+    uint waveIndex = groupIndex / laneCount;
+    uint laneIndex = WaveGetLaneIndex();
+    return groupID.x * GROUP_SIZE + waveIndex * laneCount + laneIndex;
+}
+
 RWStructuredBuffer<uint> _SubSplatIDStack; // [MAX_SUB_SPLAT_COUNT / 2], initialized as (0, 2, 4, ..., MAX_SUB_SPLAT_COUNT - 2)
 RWStructuredBuffer<uint> _SubSplatCount;
 RWStructuredBuffer<uint> _SubSplatParents; // [MAX_SUB_SPLAT_COUNT / 2]
@@ -267,17 +274,41 @@ void PushSubSplatInitID(uint splatID) {
     _SubSplatInitIDs[idx] = splatID;
 }
 
-RWStructuredBuffer<uint> _SubSplatLevels; // [_SplatCount], maintaining level of each splat, initialized as all zero
+RWStructuredBuffer<uint> _SubSplatLevels; // [(_SplatCount + 7) / 8], maintaining level of each splat, initialized as all zero
+// splatID should be a Wave-Adjusted ID
+void SetSplatLevelWithWave(uint splatID, uint splatLevel) {
+    uint laneIndex = WaveGetLaneIndex();
+    uint packedSplatLevel = splatLevel;
+    packedSplatLevel |= WaveReadLaneAt(packedSplatLevel, laneIndex | 1) << 4;
+    packedSplatLevel |= WaveReadLaneAt(packedSplatLevel, laneIndex | 2) << 8;
+    packedSplatLevel |= WaveReadLaneAt(packedSplatLevel, laneIndex | 4) << 16;
+    if ((laneIndex & 7) == 0)
+        _SubSplatLevels[splatID >> 3] = packedSplatLevel;
+}
+// splatID should be a Wave-Adjusted ID
+uint GetSplatLevelWithWave(uint splatID) {
+    uint laneIndex = WaveGetLaneIndex();
+    uint packedSplatLevel = 0;
+    if ((laneIndex & 7) == 0)
+        packedSplatLevel = _SubSplatLevels[splatID >> 3];
+    packedSplatLevel = WaveReadLaneAt(packedSplatLevel, laneIndex & (~7));
+    uint splatLevel = (packedSplatLevel >> ((laneIndex & 7) << 2)) & 0xF;
+    return splatLevel;
+}
+uint GetSplatLevel(uint splatID) {
+    return (_SubSplatLevels[splatID >> 3] >> ((splatID & 7) << 2)) & 0xF;
+}
 
-void UpdateSplatLevel(uint splatID, uint prevSplatLevel, uint splatLevel) {
+
+void UpdateSplatLevel(uint splatID, uint prevSplatLevel, inout uint io_splatLevel) {
     if (_SubSplatLocked)
         return;
-        
-    splatLevel = min(splatLevel, MAX_SUB_SPLAT_LEVEL);
-    if (splatLevel != prevSplatLevel) {
-        if (prevSplatLevel == 0 && splatLevel > 0)
+    
+    io_splatLevel = min(io_splatLevel, MAX_SUB_SPLAT_LEVEL);
+    if (io_splatLevel != prevSplatLevel) {
+        if (prevSplatLevel == 0 && io_splatLevel > 0)
             PushSubSplatInitID(splatID);
-        _SubSplatLevels[splatID] = prevSplatLevel + (splatLevel > prevSplatLevel ? 1 : -1);
+        io_splatLevel = prevSplatLevel + (io_splatLevel > prevSplatLevel ? 1 : -1);
     }
 }
 
@@ -462,34 +493,48 @@ struct SplatContext {
     bool discardSplat;
 };
 
-bool LoadSplatContext(uint idx, bool loadSubSplat, out SplatContext o_ctx) {
-    SplatContext ctx;
-
-    if (loadSubSplat) {
-        if (idx >= (e_subSplatRefCount << 1))
-            return false;
-        ctx.subSplatRef = _SubSplatSrcRefs[idx >> 1] | (idx & 1);
-        uint subSplatID, subSplatLevel;
-        DecodeSubSplatRef(ctx.subSplatRef, subSplatID, subSplatLevel);
-        SubSplatData subSplat = _SubSplats[subSplatID];
-        ctx.splatID = GetSubSplatRootSplatID(subSplatID);
-        ctx.splat = GetSplatFromSubSplat(ctx.splatID, subSplat);
-        ctx.discardSplat = false;
-    } else {
-        if (idx >= _SplatCount)
-            return false;
-        ctx.subSplatRef = -1;
-        ctx.splatID = idx;
-        ctx.splat = LoadSplatData(idx);
+bool LoadSubSplatContext(uint idx, out SplatContext o_ctx) {
+    SplatContext ctx = (SplatContext)0;
+    if (idx >= (e_subSplatRefCount << 1)) {
+        o_ctx = ctx;
+        return false;
     }
-    ctx.prevSplatLevel = _SubSplatLevels[ctx.splatID];
-
-    if (loadSubSplat)
-        ctx.discardSplat = false;
-    else
-        ctx.discardSplat = ctx.prevSplatLevel != 0;
+    ctx.subSplatRef = _SubSplatSrcRefs[idx >> 1] | (idx & 1);
+    uint subSplatID, subSplatLevel;
+    DecodeSubSplatRef(ctx.subSplatRef, subSplatID, subSplatLevel);
+    SubSplatData subSplat = _SubSplats[subSplatID];
+    ctx.splatID = GetSubSplatRootSplatID(subSplatID);
+    ctx.splat = GetSplatFromSubSplat(ctx.splatID, subSplat);
+    ctx.prevSplatLevel = GetSplatLevel(ctx.splatID);
+    ctx.discardSplat = false;
     o_ctx = ctx;
     return true;
+}
+
+bool LoadSplatContext(uint idx, bool withWave, out SplatContext o_ctx) {
+    SplatContext ctx = (SplatContext)0;
+    ctx.splatID = idx;
+    if (withWave)
+        ctx.prevSplatLevel = GetSplatLevelWithWave(ctx.splatID);
+    if (idx >= _SplatCount) {
+        o_ctx = ctx;
+        return false;
+    }
+    if (!withWave)
+        ctx.prevSplatLevel = GetSplatLevel(ctx.splatID);
+    ctx.subSplatRef = 0;
+    ctx.splat = LoadSplatData(idx);
+    ctx.discardSplat = ctx.prevSplatLevel != 0;
+    o_ctx = ctx;
+    return true;
+}
+
+bool LoadSplatContext(uint idx, out SplatContext o_ctx) {
+    return LoadSplatContext(idx, false, o_ctx);
+}
+
+bool LoadSplatContextWithWave(uint idx, out SplatContext o_ctx) {
+    return LoadSplatContext(idx, true, o_ctx);
 }
 
 void CalcViewData(uint splatID, in const SplatData splat, bool discardSplat, out uint o_splatLevel) {
@@ -566,28 +611,31 @@ void CalcViewData(uint splatID, in const SplatData splat, bool discardSplat, out
 void CSCalcViewData (uint3 id : SV_DispatchThreadID)
 {
     SplatContext ctx;
-    if (LoadSplatContext(id, false, ctx)) {
+    if (LoadSplatContext(id.x, ctx)) {
         uint splatLevel;
         CalcViewData(ctx.splatID, ctx.splat, false, splatLevel);
     }
 }
 
 [numthreads(GROUP_SIZE,1,1)]
-void CSCalcRootViewData (uint3 id : SV_DispatchThreadID)
+void CSCalcRootViewData (uint3 groupID : SV_GroupID, uint groupIndex : SV_GroupIndex)
 {
+    uint idx = GetWaveAdjustedIndex(groupID, groupIndex);
     SplatContext ctx;
-    if (LoadSplatContext(id, false, ctx)) {
-        uint splatLevel;
+    uint splatLevel = 0;
+    if (LoadSplatContextWithWave(idx, ctx)) {
         CalcViewData(ctx.splatID, ctx.splat, ctx.discardSplat, splatLevel);
         UpdateSplatLevel(ctx.splatID, ctx.prevSplatLevel, splatLevel);
     }
+    // ctx.splatID == idx
+    SetSplatLevelWithWave(ctx.splatID, splatLevel);
 }
 
 [numthreads(GROUP_SIZE,1,1)]
 void CSCalcSubViewData (uint3 id : SV_DispatchThreadID)
 {
     SplatContext ctx;
-    if (LoadSplatContext(id, true, ctx)) {
+    if (LoadSubSplatContext(id.x, ctx)) {
         uint splatLevel;
         CalcViewData(ctx.splatID, ctx.splat, ctx.discardSplat, splatLevel);
         UpdateSubSplatLevel(ctx.splatID, ctx.prevSplatLevel, ctx.subSplatRef);
