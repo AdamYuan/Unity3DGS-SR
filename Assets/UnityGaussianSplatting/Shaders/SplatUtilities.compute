@@ -628,7 +628,8 @@ void CSCalcRootViewData (uint3 groupID : SV_GroupID, uint groupIndex : SV_GroupI
         UpdateSplatLevel(ctx.splatID, ctx.prevSplatLevel, splatLevel);
     }
     // ctx.splatID == idx
-    SetSplatLevelWithWave(ctx.splatID, splatLevel);
+    if (!_SubSplatLocked)
+        SetSplatLevelWithWave(ctx.splatID, splatLevel);
 }
 
 [numthreads(GROUP_SIZE,1,1)]
