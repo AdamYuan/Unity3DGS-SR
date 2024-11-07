@@ -445,7 +445,7 @@ MonoBehaviour:
   m_SHOrder: 3
   m_SHOnly: 0
   m_EnableSubSplats: 1
-  m_LockSubSplats: 1
+  m_LockSubSplats: 0
   m_StepSubSplats: 0
   m_RenderMode: 0
   m_PointDisplaySize: 3
