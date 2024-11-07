@@ -172,9 +172,7 @@ MonoBehaviour:
         clearFlags: 0
         passFoldout: 0
         m_Version: 0
-        m_RenderMode: 1
-        m_Scale: 1
-        m_SuperSampleMethod: 0
+        m_RenderMode: 0
 --- !u!4 &1150401422
 Transform:
   m_ObjectHideFlags: 0
@@ -446,7 +444,9 @@ MonoBehaviour:
   m_OpacityScale: 1
   m_SHOrder: 3
   m_SHOnly: 0
-  m_SortNthFrame: 1
+  m_EnableSubSplats: 1
+  m_LockSubSplats: 1
+  m_StepSubSplats: 0
   m_RenderMode: 0
   m_PointDisplaySize: 3
   m_Cutouts: []
