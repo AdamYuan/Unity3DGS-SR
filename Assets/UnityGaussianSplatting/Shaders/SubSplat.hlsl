@@ -122,17 +122,16 @@ void SplitUnpackedSubSplat(
     float sqrt2PI = sqrt(2.0f * PI);
     float D = 1.0f / sqrt2PI;
 
-    float x = rot.x;
-    float y = rot.y;
-    float z = rot.z;
-    float w = rot.w;
-    float3x3 mr = float3x3(
-        1-2*(y*y + z*z),   2*(x*y - w*z),   2*(x*z + w*y),
-          2*(x*y + w*z), 1-2*(x*x + z*z),   2*(y*z - w*x),
-          2*(x*z - w*y),   2*(y*z + w*x), 1-2*(x*x + y*y)
-    );
-    float3 mainAxisLocal = float3(step(scale.y, scale.x) * step(scale.z, scale.x), step(scale.x, scale.y) * step(scale.z, scale.y), step(scale.x, scale.z) * step(scale.y, scale.z));
-    float3 mainAxisWorld = normalize(mul(mr, mainAxisLocal));
+    float3x3 mr = CalcMatrixFromRotationScale(rot, float3(1, 1, 1));
+    /* float3 mainAxisLocal = float3(step(scale.y, scale.x) * step(scale.z, scale.x), step(scale.x, scale.y) * step(scale.z, scale.y), step(scale.x, scale.z) * step(scale.y, scale.z));
+    float3 mainAxisWorld = normalize(mul(mr, mainAxisLocal)); */
+    float3 mainAxisWorld;
+    if (scale.x > scale.y && scale.x > scale.z)
+        mainAxisWorld = float3(mr[0][0], mr[1][0], mr[2][0]);
+    else if (scale.y > scale.z)
+        mainAxisWorld = float3(mr[0][1], mr[1][1], mr[2][1]);
+    else
+        mainAxisWorld = float3(mr[0][2], mr[1][2], mr[2][2]);
     
     float3 covMulAxisWorld = mul(covMatrix, mainAxisWorld);
     float tau = sqrt(dot(mainAxisWorld, covMulAxisWorld));
