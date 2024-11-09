@@ -78,14 +78,122 @@ void SplitUnpackedSubSplat(
     out UnpackedSubSplatData o_subSplat0, 
     out UnpackedSubSplatData o_subSplat1
 ) {
-    // TODO: Implement your splitting behavior
-    UnpackedSubSplatData subSplat0 = parentSubSplat, subSplat1 = parentSubSplat;
-    float3 scale = parentSubSplat.scale * 0.5;
-    subSplat0.scale = scale;
-    subSplat0.pos += scale;
-    subSplat1.scale = scale;
-    subSplat1.pos -= scale;
+    /*
+    struct UnpackedSubSplatData {
+    float3 pos;
+    float4 rot;
+    float3 scale;
+    float opacity;
+    };
+    */
 
+    /*
+        Parent Splat's Covariance matrix:
+        | cov3d0.x cov3d0.y cov3d0.z |
+        | cov3d0.y cov3d1.x cov3d1.y |
+        | cov3d0.z cov3d1.y cov2d1.z |
+    */
+    UnpackedSubSplatData subSplat0 = parentSubSplat, subSplat1 = parentSubSplat;
+    // TODO: 1. Parameters for splitting:
+    // 1. (float3)parentSubSplat.cov3d0 and (float3)parentSubSplat.cov3d1 as the original covariance matrix.
+    // 2. parentSubSplat.pos: position of the parent splat in WORLD SPACE.
+    // 3. parentSubSplat.scale: local scaling factor of the parent splat in XYZ direction.
+    // 4. parentSubSplat.rot: rotation quaternion of the parent splat.
+    // 5. parentSubSplat.opacity: opacity of the parent splat.
+    float3 pos = parentSubSplat.pos;
+    float3 scale = parentSubSplat.scale;
+    float opacity = parentSubSplat.opacity;
+    float4 rot = parentSubSplat.rot;
+    float3 cov3d0 = float3(1.0f, 0.0f, 0.0f);
+    float3 cov3d1 = float3(0.0f, 1.0f, 1.0f);
+    // TODO: 2. Uncomment the following 2 lines after passing cov3d0 and cov3d1 as parameters.
+    //float3 cov3d0 = parentSubSplat.cov3d0;
+    //float3 cov3d1 = parentSubSplat.cov3d1;
+    float3x3 covMatrix = float3x3(
+        cov3d0.x, cov3d0.y, cov3d0.z,
+        cov3d0.y, cov3d1.x, cov3d1.y,
+        cov3d0.z, cov3d1.y, cov3d1.z
+    );
+    float PI = 3.14159265359f;
+    float epsilon = 1e-20f;
+    
+    float C = 0.5f + epsilon;
+    float C2 = C * C;
+    float sqrt2PI = sqrt(2.0f * PI);
+    float D = 1.0f / sqrt2PI;
+
+    float x = rot.x;
+    float y = rot.y;
+    float z = rot.z;
+    float w = rot.w;
+    float3x3 mr = float3x3(
+        1-2*(y*y + z*z),   2*(x*y - w*z),   2*(x*z + w*y),
+          2*(x*y + w*z), 1-2*(x*x + z*z),   2*(y*z - w*x),
+          2*(x*z - w*y),   2*(y*z + w*x), 1-2*(x*x + y*y)
+    );
+    float3 mainAxisLocal = float3(step(scale.y, scale.x) * step(scale.z, scale.x), step(scale.x, scale.y) * step(scale.z, scale.y), step(scale.x, scale.z) * step(scale.y, scale.z));
+    float3 mainAxisWorld = normalize(mul(mr, mainAxisLocal));
+    
+    float3 covMulAxisWorld = mul(covMatrix, mainAxisWorld);
+    float tau = sqrt(dot(mainAxisWorld, covMulAxisWorld));
+    float tau2 = tau * tau;
+    float3 L0 = mul(covMatrix, mainAxisWorld);
+    
+    float D2_C2 = D * D / C2;
+    float3x3 L02 = float3x3(
+        L0.x * L0.x, L0.x * L0.y, L0.x * L0.z,
+        L0.y * L0.x, L0.y * L0.y, L0.y * L0.z,
+        L0.z * L0.x, L0.z * L0.y, L0.z * L0.z
+    );
+
+    float3x3 L02D2_tau2C2 = L02 * D2_C2 / tau2;
+    float3 L0D_tauC = L0 * D / tau / C;
+
+    float subSplatOpacity = opacity * 0.5f;
+    float3 subSplatPos0 = pos - L0D_tauC;
+    float3 subSplatPos1 = pos + L0D_tauC;
+
+    float3x3 subsplatCovMat = covMatrix - L02D2_tau2C2;
+    float3 subSplatCov3d0 = float3(subsplatCovMat[0][0], subsplatCovMat[0][1], subsplatCovMat[0][2]);
+    float3 subSplatCov3d1 = float3(subsplatCovMat[1][1], subsplatCovMat[1][2], subsplatCovMat[2][2]);
+    // TODO: 3. Covariance Matrix of the two sub-splats (their covariance matrix should be the same)
+    // I gotta say that I have no clue about how to decompose the 3D covariance matrix directly into rotation and scaling matrix. 
+    // In my last implementation, I'm reusing 3D-Gaussian Splatting's existing rendering method:
+    // Shader: SplatUtilities.compute, Line 570 ~ 572:
+    //     float3 cov2d = CalcCovariance2D(splat.pos, cov3d0, cov3d1, _MatrixMV, _MatrixP, _VecScreenParams);
+    //     float2 axis1, axis2;
+    //     DecomposeCovariance(cov2d, axis1, axis2);
+    // Which allows me to decompose the 3D covariance matrix into 2D form and then decompose the 2D matrix into 2 main axis in view space.
+    // You can try to implement it by two possible ways:
+    // FIRST: 1.Decompose the 3D covariance matrix directly into rotation and scaling matrix(Very Complicated).
+    //        2.Transform the rotation matrix into quaternion(Kinda Complicated), and scaling matrix into scaling vector(Quite Easy).
+    //        3.Apply the quaternion and scaling vector to the resulting two sub-splats. 
+    // SECOND: Modify your implementation in order to reuse the existing 3D-Gaussian Splatting's rendering method(Nothing Related To Math).
+
+    subSplat0.pos = subSplatPos0;
+    subSplat0.opacity = subSplatOpacity;
+    //Uncomment the following lines after implementing the decomposition of the covariance matrix.
+    /*
+    subSplat0.rot = subSplatRot;
+    subSplat0.scale = subSplatScale;
+    */
+    //OR: Uncomment the following lines after modifying your implementation to reuse the existing 3D-Gaussian Splatting's rendering method.
+    /*
+    subSplat0.cov3d0 = subSplatCov3d0;
+    subSplat0.cov3d1 = subSplatCov3d1;
+    */
+    subSplat1.pos = subSplatPos1;
+    subSplat1.opacity = subSplatOpacity;
+    //Uncomment the following lines after implementing the decomposition of the covariance matrix.
+    /*
+    subSplat1.rot = subSplatRot;
+    subSplat1.scale = subSplatScale;
+    */
+    //OR: Uncomment the following lines after modifying your implementation to reuse the existing 3D-Gaussian Splatting's rendering method.
+    /*
+    subSplat0.cov3d0 = subSplatCov3d0;
+    subSplat0.cov3d1 = subSplatCov3d1;
+    */
     o_subSplat0 = subSplat0;
     o_subSplat1 = subSplat1;
 }
@@ -108,9 +216,22 @@ __PUBLIC__ uint CalcSplatLevel(
     float3 cov2d,
     float2 screenWH
 ) {
-    // TODO: Implement your splitting level behavior
-    float d = max(0, -centerViewPos.z);
-    return uint(1.0 / d);
+    // We gotta calculate the two main axis of the parent splat's projection(An ellipse) onto the screen, which is already calculated in the 3D-Gaussian Splatting.
+    // Shader: SplatUtilities.compute, Line 570 ~ 572:
+    //     float3 cov2d = CalcCovariance2D(splat.pos, cov3d0, cov3d1, _MatrixMV, _MatrixP, _VecScreenParams);
+    //     float2 axis1, axis2;
+    //     DecomposeCovariance(cov2d, axis1, axis2);
+    // axis1 and axis2 are the two main axis of the parent splat's projection ellipse onto the screen.
+    // I'm using the length of the two main axis to estimate the size of the parent splat in screen space.
+    float2 axis1, axis2;
+    DecomposeCovariance(cov2d, axis1, axis2);
+    float2 axis = max(abs(axis1), abs(axis2)) / screenWH.xy;
+
+    float sz = max(axis.x, axis.y);
+    // The level of the sub-splat is determined by the size of the parent splat in screen space.
+    // Just an example. Further refinement required after implementing SplitUnpackedSubSplat function.
+    uint level = sz > 0.1f ? 1 : 0;
+    return level;
 }
 
 __PUBLIC__ SplatData GetSplatFromSubSplat(uint rootSplatID, in const SubSplatData subSplat) {
