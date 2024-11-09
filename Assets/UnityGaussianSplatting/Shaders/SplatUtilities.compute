@@ -563,6 +563,12 @@ void CalcViewData(uint splatID, in const SplatData splat, bool discardSplat, out
 
     float3 cov3d0, cov3d1;
     CalcCovariance3D(splatRotScaleMat, cov3d0, cov3d1);
+    // Test for DecomposeCovariance3D
+    /* float4 boxRot2;
+    float3 boxSize2;
+    DecomposeCovariance3D(cov3d0, cov3d1, boxSize2, boxRot2, 8, true);
+    splatRotScaleMat = CalcMatrixFromRotationScale(boxRot2, boxSize2);
+    CalcCovariance3D(splatRotScaleMat, cov3d0, cov3d1); */
     float splatScale2 = splatScale * splatScale;
     cov3d0 *= splatScale2;
     cov3d1 *= splatScale2;

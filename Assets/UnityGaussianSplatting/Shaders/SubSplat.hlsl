@@ -104,8 +104,8 @@ void SplitUnpackedSubSplat(
     float3 scale = parentSubSplat.scale;
     float opacity = parentSubSplat.opacity;
     float4 rot = parentSubSplat.rot;
-    float3 cov3d0 = float3(1.0f, 0.0f, 0.0f);
-    float3 cov3d1 = float3(0.0f, 1.0f, 1.0f);
+    float3 cov3d0, cov3d1;
+    CalcCovariance3D(CalcMatrixFromRotationScale(rot, scale), cov3d0, cov3d1);
     // TODO: 2. Uncomment the following 2 lines after passing cov3d0 and cov3d1 as parameters.
     //float3 cov3d0 = parentSubSplat.cov3d0;
     //float3 cov3d1 = parentSubSplat.cov3d1;
@@ -149,7 +149,7 @@ void SplitUnpackedSubSplat(
     float3x3 L02D2_tau2C2 = L02 * D2_C2 / tau2;
     float3 L0D_tauC = L0 * D / tau / C;
 
-    float subSplatOpacity = opacity * 0.5f;
+    float subSplatOpacity = opacity * 0.5;
     float3 subSplatPos0 = pos - L0D_tauC;
     float3 subSplatPos1 = pos + L0D_tauC;
 
@@ -171,7 +171,18 @@ void SplitUnpackedSubSplat(
     // SECOND: Modify your implementation in order to reuse the existing 3D-Gaussian Splatting's rendering method(Nothing Related To Math).
 
     subSplat0.pos = subSplatPos0;
+    subSplat1.pos = subSplatPos1;
     subSplat0.opacity = subSplatOpacity;
+    subSplat1.opacity = subSplatOpacity;
+    
+    float3 subSplatScale;
+    float4 subSplatRot;
+    DecomposeCovariance3D(subSplatCov3d0, subSplatCov3d1, subSplatScale, subSplatRot, 8, false);
+
+    subSplat0.scale = subSplatScale;
+    subSplat1.scale = subSplatScale;
+    subSplat0.rot = subSplatRot;
+    subSplat1.rot = subSplatRot;
     //Uncomment the following lines after implementing the decomposition of the covariance matrix.
     /*
     subSplat0.rot = subSplatRot;
@@ -182,8 +193,6 @@ void SplitUnpackedSubSplat(
     subSplat0.cov3d0 = subSplatCov3d0;
     subSplat0.cov3d1 = subSplatCov3d1;
     */
-    subSplat1.pos = subSplatPos1;
-    subSplat1.opacity = subSplatOpacity;
     //Uncomment the following lines after implementing the decomposition of the covariance matrix.
     /*
     subSplat1.rot = subSplatRot;

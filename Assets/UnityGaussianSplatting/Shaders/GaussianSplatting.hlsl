@@ -621,6 +621,57 @@ struct SplatTileViewData
     uint clipXY; // 2xFP16
 };
 
+void DecomposeCovariance3D(
+    float3 cov3d0, float3 cov3d1, 
+    out float3 o_scale, out float4 o_rotate, 
+    int maxSteps = 8, bool fp16Precision = true
+)
+{
+    #define DECOMPOSE_COV3D_FP16_ONE 0.99951171875      // 0 xxxxx 1111111111, 0.5 * (2 - 0.5 ^ 10)
+    #define DECOMPOSE_COV3D_FP16_ZERO 0.000000059604645 // 0 00000 0000000001, smallest positive subnormal number
+
+    // http://melax.github.io/diag.html
+    float3x3 A = float3x3(
+        cov3d0.x, cov3d0.y, cov3d0.z,
+        cov3d0.y, cov3d1.x, cov3d1.y,
+        cov3d0.z, cov3d1.y, cov3d1.z
+    );
+    
+	float4 q = float4(0, 0, 0, 1);
+    float3x3 D;
+	for (int i = 0; i < maxSteps; ++i)
+	{
+		float3x3 Q = CalcMatrixFromRotationScale(q, float3(1, 1, 1)); // v*Q == q*v*conj(q)
+		D = mul(mul(transpose(Q), A), Q);  // A = Q*D*Q^T
+		float3 offdiag = float3(D[1][2], D[0][2], D[0][1]); // elements not on the diagonal
+		float3 om = abs(offdiag); // mag of each offdiag elem
+		int k = (om.x > om.y && om.x > om.z) ? 0 : (om.y > om.z) ? 1 : 2; // index of largest element of offdiag
+		int k1 = (k + 1) % 3;
+		int k2 = (k + 2) % 3;
+		if ((!fp16Precision && offdiag[k] == 0) || (fp16Precision && om[k] < DECOMPOSE_COV3D_FP16_ZERO)) 
+            break;  // diagonal already
+		float thet = (D[k2][k2] - D[k1][k1]) / (2.0 * offdiag[k]);
+		float sgn = (thet > 0.0) ? 1.0 : -1.0;
+		thet *= sgn; // make it positive
+		float t = sgn / (thet + ((thet < 1.e6) ? sqrt((thet * thet) + 1.0) : thet)) ; // sign(T)/(|T|+sqrt(T^2+1))
+		float c = 1.0 / sqrt((t * t) + 1.0); //  c= 1/(t^2+1) , t=s/c 
+		if ((!fp16Precision && c == 1.0) || (fp16Precision && c > DECOMPOSE_COV3D_FP16_ONE)) 
+            break;  // no room for improvement - reached machine precision.
+		float4 jr = float4(0, 0, 0, 0); // jacobi rotation for this iteration.
+		jr[k] = sgn * sqrt((1.0 - c) * 0.5);  // using 1/2 angle identity sin(a/2) = sqrt((1-cos(a))/2)  
+		jr[k] = -jr[k]; // since our quat-to-matrix convention was for v*M instead of M*v
+		jr.w  = sqrt(1.0 - (jr[k] * jr[k]));
+		if ((!fp16Precision && jr.w == 1.0) || (fp16Precision && jr.w > DECOMPOSE_COV3D_FP16_ONE)) 
+            break; // reached limits of floating point precision
+        q = QuatMul(q, jr);
+        q = normalize(q);
+	} 
+    float3 s2 = float3(D[0][0], D[1][1], D[2][2]);
+
+    o_scale = sqrt(abs(s2));
+    o_rotate = q;
+}
+
 void DecomposeCovariance(float3 cov2d, out float2 v1, out float2 v2)
 {
     #if 0 // does not quite give the correct results?
