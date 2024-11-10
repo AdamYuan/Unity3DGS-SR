@@ -537,7 +537,7 @@ bool LoadSplatContextWithWave(uint idx, out SplatContext o_ctx) {
     return LoadSplatContext(idx, true, o_ctx);
 }
 
-void CalcViewData(uint splatID, in const SplatData splat, bool discardSplat, out uint o_splatLevel) {
+void CalcViewData(uint splatID, in const SplatData splat, bool isSubSplat, bool discardSplat, out uint o_splatLevel) {
     o_splatLevel = 0;
     
     float3 centerWorldPos = mul(_MatrixObjectToWorld, float4(splat.pos, 1)).xyz;
@@ -591,7 +591,7 @@ void CalcViewData(uint splatID, in const SplatData splat, bool discardSplat, out
     view.color.y = (f32tof16(col.b) << 16) | f32tof16(col.a);
     view.axis.x = f32tof16(axis1.x) | (f32tof16(axis1.y) << 16);
     view.axis.y = f32tof16(axis2.x) | (f32tof16(axis2.y) << 16);
-    view.splatID = splatID;
+    view.subSplatFlagSplatID = splatID | (isSubSplat ? 0x80000000 : 0);
     
     o_splatLevel = CalcSplatLevel(
         splatID, splat, 
@@ -620,7 +620,7 @@ void CSCalcViewData (uint3 id : SV_DispatchThreadID)
     SplatContext ctx;
     if (LoadSplatContext(id.x, ctx)) {
         uint splatLevel;
-        CalcViewData(ctx.splatID, ctx.splat, false, splatLevel);
+        CalcViewData(ctx.splatID, ctx.splat, false, false, splatLevel);
     }
 }
 
@@ -631,7 +631,7 @@ void CSCalcRootViewData (uint3 groupID : SV_GroupID, uint groupIndex : SV_GroupI
     SplatContext ctx;
     uint splatLevel = 0;
     if (LoadSplatContextWithWave(idx, ctx)) {
-        CalcViewData(ctx.splatID, ctx.splat, ctx.discardSplat, splatLevel);
+        CalcViewData(ctx.splatID, ctx.splat, false, ctx.discardSplat, splatLevel);
         UpdateSplatLevel(ctx.splatID, ctx.prevSplatLevel, splatLevel);
     }
     // ctx.splatID == idx
@@ -645,7 +645,7 @@ void CSCalcSubViewData (uint3 id : SV_DispatchThreadID)
     SplatContext ctx;
     if (LoadSubSplatContext(id.x, ctx)) {
         uint splatLevel;
-        CalcViewData(ctx.splatID, ctx.splat, ctx.discardSplat, splatLevel);
+        CalcViewData(ctx.splatID, ctx.splat, true, ctx.discardSplat, splatLevel);
         UpdateSubSplatLevel(ctx.splatID, ctx.prevSplatLevel, ctx.subSplatRef);
     }
 }

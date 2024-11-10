@@ -59,12 +59,14 @@ v2f vert (uint vtxID : SV_VertexID, uint instID : SV_InstanceID)
 	// is this splat selected?
 	if (_SplatBitsValid)
 	{
-		uint splatID = view.splatID;
+		uint splatID = view.subSplatFlagSplatID & 0x7FFFFFFF;
+		bool isSubSplat = bool(view.subSplatFlagSplatID >> 31);
+
 		uint wordIdx = splatID / 32;
 		uint bitIdx = splatID & 31;
 		uint selVal = _SplatSelectedBits.Load(wordIdx * 4);
 		if (selVal & (1 << bitIdx))
-			o.col.a = -1;				
+			o.col.a = isSubSplat ? -2 : -1;
 	}
 
     return o;
@@ -81,7 +83,7 @@ half4 frag (v2f i) : SV_Target
 	else
 	{
 		// "selected" splat: magenta outline, increase opacity, magenta tint
-		half3 selectedColor = half3(1,0,1);
+		half3 selectedColor = i.col.a == -1 ? half3(1,0,1) : half3(0,0,1);
 		if (alpha > 7.0/255.0)
 		{
 			if (alpha < 10.0/255.0)

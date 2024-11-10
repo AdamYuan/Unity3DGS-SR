@@ -612,7 +612,7 @@ struct SplatViewData
     uint2 color; // 4xFP16
     uint2 axis;  // 4xFP16
     uint clipXY; // 2xFP16
-    uint splatID;
+    uint subSplatFlagSplatID; // 1-bit Flag + 31-bit splatID
 };
 
 struct SplatTileViewData
