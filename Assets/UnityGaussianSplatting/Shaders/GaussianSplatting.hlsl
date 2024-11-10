@@ -612,6 +612,7 @@ struct SplatViewData
     uint2 color; // 4xFP16
     uint2 axis;  // 4xFP16
     uint clipXY; // 2xFP16
+    uint splatID;
 };
 
 struct SplatTileViewData
@@ -648,6 +649,7 @@ void DecomposeCovariance3D(
         int k = (om.x > om.y && om.x > om.z) ? 0 : (om.y > om.z) ? 1 : 2; // index of largest element of offdiag
         int k1 = (k + 1) % 3;
         int k2 = (k + 2) % 3;
+        // TODO: Dynamic Indexing is not optimal since it will spill registers into local memory. Replace with branches / selects
         if ((!fp16Precision && offdiag[k] == 0) || (fp16Precision && om[k] < DECOMPOSE_COV3D_FP16_ZERO)) 
             break;  // diagonal already
         float thet = (D[k2][k2] - D[k1][k1]) / (2.0 * offdiag[k]);

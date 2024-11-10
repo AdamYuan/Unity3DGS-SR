@@ -55,6 +55,18 @@ v2f vert (uint vtxID : SV_VertexID, uint instID : SV_InstanceID)
 	float2 deltaScreenPos = (quadPos.x * axis1 + quadPos.y * axis2) * 2 / _ScreenParams.xy;
 	o.vertex = float4(centerClipXY, 0, 1);
 	o.vertex.xy += deltaScreenPos;
+	
+	// is this splat selected?
+	if (_SplatBitsValid)
+	{
+		uint splatID = view.splatID;
+		uint wordIdx = splatID / 32;
+		uint bitIdx = splatID & 31;
+		uint selVal = _SplatSelectedBits.Load(wordIdx * 4);
+		if (selVal & (1 << bitIdx))
+			o.col.a = -1;				
+	}
+
     return o;
 }
 
