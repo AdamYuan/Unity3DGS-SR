@@ -124,7 +124,8 @@ void SplitUnpackedSubSplat(
     float3x3 L02D2_tau2C2 = L02 * D2_C2 / tau2;
     float3 L0D_tauC = L0 * D / tau / C;
 
-    float subSplatOpacity = opacity * 0.5f;
+    // float subSplatOpacity = opacity * 0.5f;
+    float subSplatOpacity = opacity * 0.9; // Incorrect in theory, but has better effect
     float3 subSplatPos0 = pos - L0D_tauC;
     float3 subSplatPos1 = pos + L0D_tauC;
 
