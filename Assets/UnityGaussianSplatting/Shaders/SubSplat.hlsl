@@ -170,8 +170,9 @@ __PUBLIC__ uint CalcSplatLevel(
     float lambda1, _;
     DecomposeCovarianceLambda(cov2d, lambda1, _);
     float scale = sqrt(lambda1);
-    float sz = scale / max(screenWH.x, screenWH.y);
-    uint level = sz * 15.0;
+    float k = 4.0 * scale / max(screenWH.x, screenWH.y);
+    const float k0 = 0.05;
+    uint level = firstbithigh(max(int(k / k0), 1)); // Log2
     return level;
 }
 
