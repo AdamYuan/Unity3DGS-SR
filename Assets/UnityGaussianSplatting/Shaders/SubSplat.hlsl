@@ -173,7 +173,8 @@ __PUBLIC__ uint CalcSplatLevel(
     float scale = sqrt(lambda1);
     float k = 4.0 * scale / max(screenWH.x, screenWH.y);
     const float k0 = 0.05;
-    uint level = firstbithigh(max(int(k / k0), 1)); // Log2
+    float r = max(k / k0, 1.0);
+    uint level = (asuint(r) >> 23) - 127; // log_2
     return level;
 }
 
