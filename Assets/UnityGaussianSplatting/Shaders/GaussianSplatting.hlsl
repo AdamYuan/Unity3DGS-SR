@@ -674,6 +674,17 @@ void DecomposeCovariance3D(
     o_rotate = q;
 }
 
+void DecomposeCovarianceLambda(float3 cov2d, out float o_lambda1, out float o_lambda2) {
+    // same as in antimatter15/splat
+    float diag1 = cov2d.x, diag2 = cov2d.z, offDiag = cov2d.y;
+    float mid = 0.5f * (diag1 + diag2);
+    float radius = length(float2((diag1 - diag2) / 2.0, offDiag));
+    float lambda1 = mid + radius;
+    float lambda2 = max(mid - radius, 0.1);
+    o_lambda1 = lambda1;
+    o_lambda2 = lambda2;
+}
+
 void DecomposeCovariance(float3 cov2d, out float2 v1, out float2 v2)
 {
     #if 0 // does not quite give the correct results?

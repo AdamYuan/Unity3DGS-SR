@@ -167,21 +167,11 @@ __PUBLIC__ uint CalcSplatLevel(
     float3 cov2d,
     float2 screenWH
 ) {
-    // We gotta calculate the two main axis of the parent splat's projection(An ellipse) onto the screen, which is already calculated in the 3D-Gaussian Splatting.
-    // Shader: SplatUtilities.compute, Line 570 ~ 572:
-    //     float3 cov2d = CalcCovariance2D(splat.pos, cov3d0, cov3d1, _MatrixMV, _MatrixP, _VecScreenParams);
-    //     float2 axis1, axis2;
-    //     DecomposeCovariance(cov2d, axis1, axis2);
-    // axis1 and axis2 are the two main axis of the parent splat's projection ellipse onto the screen.
-    // I'm using the length of the two main axis to estimate the size of the parent splat in screen space.
-    float2 axis1, axis2;
-    DecomposeCovariance(cov2d, axis1, axis2);
-    float2 axis = max(abs(axis1), abs(axis2)) / screenWH.xy;
-
-    float sz = max(axis.x, axis.y);
-    // The level of the sub-splat is determined by the size of the parent splat in screen space.
-    // Just an example. Further refinement required after implementing SplitUnpackedSubSplat function.
-    uint level = sz * 10.0;
+    float lambda1, _;
+    DecomposeCovarianceLambda(cov2d, lambda1, _);
+    float scale = sqrt(lambda1);
+    float sz = scale / max(screenWH.x, screenWH.y);
+    uint level = sz * 15.0;
     return level;
 }
 
