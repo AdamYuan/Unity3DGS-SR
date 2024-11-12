@@ -139,7 +139,7 @@ void SplitUnpackedSubSplat(
     
     float3 subSplatScale;
     float4 subSplatRot;
-    DecomposeCovariance3D(subSplatCov3d0, subSplatCov3d1, subSplatScale, subSplatRot, 24, false);
+    DecomposeCovariance3D(subSplatCov3d0, subSplatCov3d1, subSplatScale, subSplatRot, 8, false);
 
     subSplat0.scale = subSplatScale;
     subSplat1.scale = subSplatScale;
