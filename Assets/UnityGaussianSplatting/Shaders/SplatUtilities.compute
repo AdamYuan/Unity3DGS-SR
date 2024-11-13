@@ -655,10 +655,11 @@ void CSInitViewSplatIndirect () {
     uint count = _ViewSplatCount[0];
     count = min(count, _SplatCount); // Use _SplatCount as MaxViewSplatCount
     _ViewSplatCount[0] = count;
-    _ViewSplatDrawIndirect[0] = 1;     // vertex count per instance
+    _ViewSplatDrawIndirect[0] = 6;     // index count per instance (6 for a quad)
     _ViewSplatDrawIndirect[1] = count; // instance count
-    _ViewSplatDrawIndirect[2] = 0;     // start vertex location
-    _ViewSplatDrawIndirect[3] = 0;     // start instance location
+    _ViewSplatDrawIndirect[2] = 0;     // start index location
+    _ViewSplatDrawIndirect[3] = 0;     // base vertex location
+    _ViewSplatDrawIndirect[4] = 0;     // start instance location
 }
 
 RWStructuredBuffer<uint> _TileSplatSortDistances;
