@@ -13,6 +13,7 @@ Shader "Gaussian Splatting/Render Splats"
             
 CGPROGRAM
 #pragma vertex vert
+#pragma geometry geom
 #pragma fragment frag
 #pragma require compute
 #pragma use_dxc
@@ -21,8 +22,13 @@ CGPROGRAM
 
 StructuredBuffer<uint> _OrderBuffer;
 
-struct v2f
-{
+struct v2g {
+    half4 col : COLOR0;
+	half4 axis : TEXCOORD0;
+	float2 center : TEXCOORD1;
+};
+
+struct g2f {
     half4 col : COLOR0;
     float2 pos : TEXCOORD0;
     float4 vertex : SV_POSITION;
@@ -32,11 +38,10 @@ StructuredBuffer<SplatViewData> _SplatViewData;
 ByteAddressBuffer _SplatSelectedBits;
 uint _SplatBitsValid;
 
-v2f vert (uint vtxID : SV_VertexID, uint instID : SV_InstanceID)
+v2g vert(uint instID : SV_InstanceID)
 {
-    v2f o = (v2f)0;
-    instID = _OrderBuffer[instID];
-	SplatViewData view = _SplatViewData[instID];
+	v2g o = (v2g)0;
+	SplatViewData view = _SplatViewData[_OrderBuffer[instID]];
     float2 centerClipXY = float2(f16tof32(view.clipXY), f16tof32(view.clipXY >> 16u));
 	float2 axis1 = float2(f16tof32(view.axis.x), f16tof32(view.axis.x >> 16u));
 	float2 axis2 = float2(f16tof32(view.axis.y), f16tof32(view.axis.y >> 16u));
@@ -45,17 +50,10 @@ v2f vert (uint vtxID : SV_VertexID, uint instID : SV_InstanceID)
 	o.col.g = f16tof32(view.color.x);
 	o.col.b = f16tof32(view.color.y >> 16);
 	o.col.a = f16tof32(view.color.y);
-
-	uint idx = vtxID;
-	float2 quadPos = float2(idx&1, (idx>>1)&1) * 2.0 - 1.0;
-	quadPos *= 2;
-
-	o.pos = quadPos;
-
-	float2 deltaScreenPos = (quadPos.x * axis1 + quadPos.y * axis2) * 2 / _ScreenParams.xy;
-	o.vertex = float4(centerClipXY, 0, 1);
-	o.vertex.xy += deltaScreenPos;
 	
+	o.axis = half4(axis1, axis2);
+	o.center = centerClipXY;
+
 	// is this splat selected?
 	if (_SplatBitsValid)
 	{
@@ -72,7 +70,31 @@ v2f vert (uint vtxID : SV_VertexID, uint instID : SV_InstanceID)
     return o;
 }
 
-half4 frag (v2f i) : SV_Target
+[maxvertexcount(4)]
+void geom(point v2g points[1], inout TriangleStream<g2f> tri) {
+	v2g p = points[0];
+	
+	g2f o;
+	o.col = p.col;
+
+	o.pos = float2(-2, -2);
+	o.vertex = float4(p.center + (o.pos.x * p.axis.xy + o.pos.y * p.axis.zw) * 2.0 / _ScreenParams.xy, 0, 1);
+	tri.Append(o);
+
+	o.pos = float2(2, -2);
+	o.vertex = float4(p.center + (o.pos.x * p.axis.xy + o.pos.y * p.axis.zw) * 2.0 / _ScreenParams.xy, 0, 1);
+	tri.Append(o);
+
+	o.pos = float2(-2, 2);
+	o.vertex = float4(p.center + (o.pos.x * p.axis.xy + o.pos.y * p.axis.zw) * 2.0 / _ScreenParams.xy, 0, 1);
+	tri.Append(o);
+
+	o.pos = float2(2, 2);
+	o.vertex = float4(p.center + (o.pos.x * p.axis.xy + o.pos.y * p.axis.zw) * 2.0 / _ScreenParams.xy, 0, 1);
+	tri.Append(o);
+}
+
+half4 frag (g2f i) : SV_Target
 {
 	float power = -dot(i.pos, i.pos);
 	half alpha = exp(power);

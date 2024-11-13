@@ -162,7 +162,7 @@ namespace GaussianSplatting.Runtime
 
                 cmb.BeginSample(s_ProfDraw);
                 if (gs.m_RenderMode == GaussianSplatRenderer.RenderMode.Splats)
-                    cmb.DrawProceduralIndirect(gs.m_GpuIndexBuffer, matrix, displayMat, 0, topology, gs.m_GpuDrawIndirectBuffer, 0, mpb);
+                    cmb.DrawProceduralIndirect(matrix, displayMat, 0, MeshTopology.Points, gs.m_GpuDrawIndirectBuffer, 0, mpb);
                 else
                     cmb.DrawProcedural(gs.m_GpuIndexBuffer, matrix, displayMat, 0, topology, indexCount, instanceCount, mpb);
                 cmb.EndSample(s_ProfDraw);
@@ -542,7 +542,7 @@ namespace GaussianSplatting.Runtime
             });
 
             m_GpuViewSplatCount = new GraphicsBuffer(GraphicsBuffer.Target.Structured | GraphicsBuffer.Target.Constant, 1, sizeof(uint));
-            m_GpuDrawIndirectBuffer = new GraphicsBuffer(GraphicsBuffer.Target.Structured | GraphicsBuffer.Target.IndirectArguments, 5, sizeof(uint));
+            m_GpuDrawIndirectBuffer = new GraphicsBuffer(GraphicsBuffer.Target.Structured | GraphicsBuffer.Target.IndirectArguments, 4, sizeof(uint));
 
             m_GpuTileSplatCount = new GraphicsBuffer(GraphicsBuffer.Target.Structured | GraphicsBuffer.Target.Constant, 1, sizeof(uint));
             m_GpuTileSplatIndirect = new GraphicsBuffer(GraphicsBuffer.Target.Structured | GraphicsBuffer.Target.IndirectArguments, 3, sizeof(uint));
