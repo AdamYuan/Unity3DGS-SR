@@ -95,7 +95,7 @@ void SplitUnpackedSubSplat(
     
     float C = 0.5f + epsilon;
     float C2 = C * C;
-    float sqrt2PI = sqrt(2.0f * PI);
+    float sqrt2PI = 2.5066282746310002;
     float D = 1.0f / sqrt2PI;
 
     float3x3 mr = CalcMatrixFromRotationScale(rot, float3(1, 1, 1));
