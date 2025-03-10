@@ -1,0 +1,14 @@
+Library/
+.vscode/
+*.csproj
+*.sln
+obj/
+UserSettings/
+Temp/
+Logs/
+Assets/GaussianAssets/
+Assets/models/
+Assets/GaussianAssets.meta
+Build/
+Recordings/
+
