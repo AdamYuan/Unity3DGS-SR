@@ -142,6 +142,8 @@ namespace GaussianSplatting.Runtime
                 mpb.SetInteger(GaussianSplatRenderer.Props.SHOrder, gs.m_SHOrder);
                 mpb.SetInteger(GaussianSplatRenderer.Props.SHOnly, gs.m_SHOnly ? 1 : 0);
                 mpb.SetInteger(GaussianSplatRenderer.Props.EnableSAGS, gs.m_EnableSAGS ? 1 : 0);
+                mpb.SetInteger(GaussianSplatRenderer.Props.UseCameraPosition, gs.m_UseCameraPosition ? 1 : 0);
+                mpb.SetVector(GaussianSplatRenderer.Props.TrainingCameraPosition, gs.m_TrainingCameraPosition);
                 mpb.SetInteger(GaussianSplatRenderer.Props.DisplayIndex, gs.m_RenderMode == GaussianSplatRenderer.RenderMode.DebugPointIndices ? 1 : 0);
                 mpb.SetInteger(GaussianSplatRenderer.Props.DisplayChunks, gs.m_RenderMode == GaussianSplatRenderer.RenderMode.DebugChunkBounds ? 1 : 0);
 
@@ -285,12 +287,16 @@ namespace GaussianSplatting.Runtime
 
         // For SAGS
         public bool m_EnableSAGS = false;
+        public bool m_UseCameraPosition =  false;
         [Range(1, 3840)]
         [Tooltip("Resolution for training(also ideal resolution for rendering)")]
         public float m_TrainingResolution =  1920.0f;
-        [Range(100.0f, 3000.0f)]
+        [Range(1000f, 3000.0f)]
         [Tooltip("Focal length for training(also ideal focal length for rendering)")]
         public float m_TrainingFocalLength = 1000.0f;
+        [Tooltip("Ideal camera position for rendering, used when calculating SAGS")]
+        public Vector3 m_TrainingCameraPosition = new Vector3(0.0f, 0.0f, 0.0f);
+        
 
 
         public RenderMode m_RenderMode = RenderMode.Splats;
@@ -395,6 +401,8 @@ namespace GaussianSplatting.Runtime
             public static readonly int SHOrder = Shader.PropertyToID("_SHOrder");
             public static readonly int SHOnly = Shader.PropertyToID("_SHOnly");
             public static readonly int EnableSAGS = Shader.PropertyToID("_EnableSAGS");
+            public static readonly int UseCameraPosition = Shader.PropertyToID("_UseCameraPosition");
+            public static readonly int TrainingCameraPosition = Shader.PropertyToID("_TrainingCameraPosition");
             public static readonly int DisplayIndex = Shader.PropertyToID("_DisplayIndex");
             public static readonly int DisplayChunks = Shader.PropertyToID("_DisplayChunks");
             public static readonly int GaussianSplatRT = Shader.PropertyToID("_GaussianSplatRT");
@@ -823,7 +831,8 @@ namespace GaussianSplatting.Runtime
             cmb.SetComputeIntParam(m_CSSplatUtilities, Props.SHOrder, m_SHOrder);
             cmb.SetComputeIntParam(m_CSSplatUtilities, Props.SHOnly, m_SHOnly ? 1 : 0);
             cmb.SetComputeIntParam(m_CSSplatUtilities, Props.EnableSAGS, m_EnableSAGS ? 1 : 0);
-
+            cmb.SetComputeIntParam(m_CSSplatUtilities, Props.UseCameraPosition, m_UseCameraPosition ? 1 : 0);
+            cmb.SetComputeVectorParam(m_CSSplatUtilities, Props.TrainingCameraPosition, m_TrainingCameraPosition);
             // Debug 
             /*
             var subSplatCountData = new uint[1];
@@ -973,6 +982,8 @@ namespace GaussianSplatting.Runtime
             cmb.SetComputeIntParam(m_CSSplatUtilities, Props.SHOrder, m_SHOrder);
             cmb.SetComputeIntParam(m_CSSplatUtilities, Props.SHOnly, m_SHOnly ? 1 : 0);
             cmb.SetComputeIntParam(m_CSSplatUtilities, Props.EnableSAGS, m_EnableSAGS ? 1 : 0);
+            cmb.SetComputeIntParam(m_CSSplatUtilities, Props.UseCameraPosition, m_UseCameraPosition ? 1 : 0);
+            cmb.SetComputeVectorParam(m_CSSplatUtilities, Props.TrainingCameraPosition, m_TrainingCameraPosition);
             cmb.SetComputeBufferParam(m_CSSplatUtilities, (int)KernelIndices.CalcTileViewData, Props.TileSplatSortDistances, m_GpuTileSortTileDist);
             cmb.SetComputeBufferParam(m_CSSplatUtilities, (int)KernelIndices.CalcTileViewData, Props.TileSplatSortKeys, m_GpuTileSortKeys);
             cmb.SetComputeBufferParam(m_CSSplatUtilities, (int)KernelIndices.CalcTileViewData, Props.TileSplatCount, m_GpuTileSplatCount);

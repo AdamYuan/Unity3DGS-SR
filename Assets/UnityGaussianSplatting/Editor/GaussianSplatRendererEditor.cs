@@ -39,6 +39,8 @@ namespace GaussianSplatting.Editor
         SerializedProperty m_PropEnableSAGS;
         SerializedProperty m_PropTrainingResolution;
         SerializedProperty m_PropTrainingFocalLength;
+        SerializedProperty m_PropUseCameraPosition;
+        SerializedProperty m_PropTrainingCameraPosition;
 
         bool m_ResourcesExpanded = false;
         int m_CameraIndex = 0;
@@ -83,6 +85,8 @@ namespace GaussianSplatting.Editor
             m_PropEnableSAGS = serializedObject.FindProperty("m_EnableSAGS");
             m_PropTrainingResolution = serializedObject.FindProperty("m_TrainingResolution");
             m_PropTrainingFocalLength = serializedObject.FindProperty("m_TrainingFocalLength");
+            m_PropUseCameraPosition = serializedObject.FindProperty("m_UseCameraPosition");
+            m_PropTrainingCameraPosition = serializedObject.FindProperty("m_TrainingCameraPosition");
             s_AllEditors.Add(this);
         }
 
@@ -136,6 +140,12 @@ namespace GaussianSplatting.Editor
             if (m_PropEnableSAGS.boolValue) {
                 EditorGUILayout.PropertyField(m_PropTrainingResolution);
                 EditorGUILayout.PropertyField(m_PropTrainingFocalLength);
+                EditorGUILayout.PropertyField(m_PropUseCameraPosition);
+                if(m_PropUseCameraPosition.boolValue){
+                    if(GUILayout.Button("Set Training Camera Position")){
+                        m_PropTrainingCameraPosition.vector3Value = Camera.main.transform.position;
+                    }
+                }
             }
             EditorGUILayout.Space();
 

@@ -134,6 +134,53 @@ float3 CalcCovariance2DSAGS(float3 worldPos, float3 cov3d0, float3 cov3d1, float
     return float3(cov._m00, cov._m01, cov._m11);
 }
 
+float3 CalcCovariance2DSAGSDistance(float3 worldPos, float3 cov3d0, float3 cov3d1, float4x4 matrixV, float4x4 matrixP, float4 screenParams, float3 trainingCameraPos, float3 cameraPos)
+{
+    float4x4 viewMatrix = matrixV;
+    float3 viewPos = mul(viewMatrix, float4(worldPos, 1)).xyz;
+
+    // this is needed in order for splats that are visible in view but clipped "quite a lot" to work
+    float aspect = matrixP._m00 / matrixP._m11;
+    float tanFovX = rcp(matrixP._m00);
+    float tanFovY = rcp(matrixP._m11 * aspect);
+    float limX = 1.3 * tanFovX;
+    float limY = 1.3 * tanFovY;
+    viewPos.x = clamp(viewPos.x / viewPos.z, -limX, limX) * viewPos.z;
+    viewPos.y = clamp(viewPos.y / viewPos.z, -limY, limY) * viewPos.z;
+
+    float focal = screenParams.x * matrixP._m00 / 2;
+
+    float3x3 J = float3x3(
+        focal / viewPos.z, 0, -(focal * viewPos.x) / (viewPos.z * viewPos.z),
+        0, focal / viewPos.z, -(focal * viewPos.y) / (viewPos.z * viewPos.z),
+        0, 0, 0
+    );
+    float3x3 W = (float3x3)viewMatrix;
+    float3x3 T = mul(J, W);
+    float3x3 V = float3x3(
+        cov3d0.x, cov3d0.y, cov3d0.z,
+        cov3d0.y, cov3d1.x, cov3d1.y,
+        cov3d0.z, cov3d1.y, cov3d1.z
+    );
+    float3x3 cov = mul(T, mul(V, transpose(T)));
+
+    // 2D filter
+    float trainingResulution = screenParams.z;
+    float trainingFocalLength = screenParams.w;
+    float currentResolution = screenParams.x;
+    float l_sig = 0.3;
+    float d1 = length(cameraPos - worldPos.xyz);
+    float d2 = length(trainingCameraPos - worldPos.xyz);
+    float deltaR = trainingResulution / currentResolution;
+    float deltaD = trainingFocalLength / focal;
+    float DistanceDiffer = d1 / d2;
+    float r = deltaR / deltaD / DistanceDiffer;
+    float rr = r * r;
+    cov._m00 += l_sig * rr;
+    cov._m11 += l_sig * rr;
+    return float3(cov._m00, cov._m01, cov._m11);
+}
+
 float3 CalcConic(float3 cov2d)
 {
     float det = cov2d.x * cov2d.z - cov2d.y * cov2d.y;
